@@ -1,4 +1,7 @@
 // /api/self-test.js
+// /api/self-test.js
+// /api/self-test.js
+
 import path from 'path';
 import { fileURLToPath } from 'url';
 
