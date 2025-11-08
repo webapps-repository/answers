@@ -1,11 +1,5 @@
 // /api/spiritual-report.js
 // /api/spiritual-report.js
-// /api/spiritual-report.js
-// /api/spiritual-report.js
-// /api/spiritual-report.js
-// /api/spiritual-report.js
-// /api/spiritual-report.js
-// /api/spiritual-report.js
 
 import { formidable } from 'formidable';
 import fs from 'fs';
@@ -19,6 +13,17 @@ export const config = {
 };
 
 export default async function handler(req, res) {
+  // ✅ Add CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*'); // Or restrict to Shopify domain for security
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+
+  // ✅ Handle CORS preflight requests (important!)
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method === 'GET') {
     return res.status(200).json({
       success: true,
@@ -27,7 +32,6 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    // ✅ Corrected Formidable v3+ usage
     const form = formidable({ multiples: false, keepExtensions: true });
 
     form.parse(req, async (err, fields, files) => {
@@ -36,7 +40,6 @@ export default async function handler(req, res) {
         return res.status(500).json({ success: false, error: 'Form parsing error' });
       }
 
-      // --- Debug: Log token + secret status
       console.log("Token received:", fields["g-recaptcha-response"]);
       console.log("Using secret:", process.env.RECAPTCHA_SECRET_KEY ? "✅ Present" : "❌ Missing");
 
@@ -46,7 +49,6 @@ export default async function handler(req, res) {
       }
 
       try {
-        // --- Verify token
         const verify = await fetch('https://www.google.com/recaptcha/api/siteverify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -69,7 +71,6 @@ export default async function handler(req, res) {
           });
         }
 
-        // --- Process report
         const fullName = fields.name;
         const birthdate = fields.birthdate;
         const birthTime = fields.birthtime;
