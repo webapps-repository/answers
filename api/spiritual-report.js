@@ -1,3 +1,7 @@
+// fixed
+// fixed
+// fixed
+
 import formidable from 'formidable';
 import fs from 'fs';
 import fetch from 'node-fetch';
@@ -19,25 +23,21 @@ function setCorsHeaders(res) {
 
 export default async function handler(req, res) {
   try {
-    // always send CORS headers
     setCorsHeaders(res);
 
-    // handle preflight OPTIONS requests
     if (req.method === 'OPTIONS') {
       return res.status(200).end();
     }
 
-    // Simple GET health check
     if (req.method === 'GET') {
       return res.status(200).json({
         success: true,
-        message: 'GET OK - /api/spiritual-report is reachable'
+        message: 'GET OK - /api/spiritual-report is reachable',
       });
     }
 
-    // Handle POST with form data
     if (req.method === 'POST') {
-      const form = new formidable.IncomingForm({ keepExtensions: true });
+      const form = formidable({ keepExtensions: true });
 
       form.parse(req, async (err, fields, files) => {
         try {
@@ -68,7 +68,7 @@ export default async function handler(req, res) {
             return res.status(403).json({
               success: false,
               error: 'reCAPTCHA verification failed',
-              details: verification
+              details: verification,
             });
           }
 
@@ -85,7 +85,7 @@ export default async function handler(req, res) {
             birthdate,
             birthTime,
             birthPlace,
-            reading: "Your spiritual insights go here...",
+            reading: 'Your spiritual insights go here...',
           });
 
           // Send email with attachment
@@ -108,10 +108,9 @@ export default async function handler(req, res) {
           return res.status(500).json({ success: false, error: innerErr.message });
         }
       });
-      return; // stop execution after form.parse()
+      return;
     }
 
-    // Any other HTTP method
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   } catch (err) {
     console.error('Fatal error in handler:', err);
