@@ -63,7 +63,10 @@ export default async function handler(req, res) {
         });
 
         const verification = await verify.json();
+        
         console.log("reCAPTCHA verification response:", verification);
+        console.log("Verifying domain:", verification.hostname);
+        console.log("Verification details:", verification);
 
         if (!verification.success) {
           console.error('❌ reCAPTCHA verification failed:', verification);
