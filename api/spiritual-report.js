@@ -1,17 +1,20 @@
 // /api/spiritual-report.js
-import formidable from 'formidable';
+// /api/spiritual-report.js
+// /api/spiritual-report.js
+// /api/spiritual-report.js
+
+import { formidable } from 'formidable';
 import fs from 'fs';
 import { generatePdfBuffer } from './utils/generatePdf.js';
 import { sendEmailWithAttachment } from './utils/sendEmail.js';
 
 export const config = {
   api: {
-    bodyParser: false, // Disable Next.js body parser for file uploads
+    bodyParser: false, // Required for file uploads
   },
 };
 
 export default async function handler(req, res) {
-  // --- GET request handler (for basic endpoint check)
   if (req.method === 'GET') {
     return res.status(200).json({
       success: true,
@@ -19,9 +22,9 @@ export default async function handler(req, res) {
     });
   }
 
-  // --- POST request handler (form submission)
   if (req.method === 'POST') {
-    const form = new formidable.IncomingForm({ keepExtensions: true });
+    // ✅ Corrected Formidable v3+ usage
+    const form = formidable({ multiples: false, keepExtensions: true });
 
     form.parse(req, async (err, fields, files) => {
       if (err) {
@@ -29,7 +32,7 @@ export default async function handler(req, res) {
         return res.status(500).json({ success: false, error: 'Form parsing error' });
       }
 
-      // --- Debug: Show token and secret key status
+      // --- Debug: Log token + secret status
       console.log("Token received:", fields["g-recaptcha-response"]);
       console.log("Using secret:", process.env.RECAPTCHA_SECRET_KEY ? "✅ Present" : "❌ Missing");
 
@@ -39,20 +42,18 @@ export default async function handler(req, res) {
       }
 
       try {
-        // --- Verify token with Google reCAPTCHA
-        const recaptchaVerify = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+        // --- Verify token
+        const verify = await fetch('https://www.google.com/recaptcha/api/siteverify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({
             secret: process.env.RECAPTCHA_SECRET_KEY,
             response: token,
-            remoteip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+            remoteip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
           }),
         });
 
-        const verification = await recaptchaVerify.json();
-
-        // --- Log full verification result
+        const verification = await verify.json();
         console.log("reCAPTCHA verification response:", verification);
 
         if (!verification.success) {
@@ -64,14 +65,13 @@ export default async function handler(req, res) {
           });
         }
 
-        // --- Continue with your business logic
+        // --- Process report
         const fullName = fields.name;
         const birthdate = fields.birthdate;
         const birthTime = fields.birthtime;
         const birthPlace = `${fields.birthcity}, ${fields.birthstate}, ${fields.birthcountry}`;
         const email = fields.email;
 
-        // Generate the report PDF
         const pdfBuffer = await generatePdfBuffer({
           fullName,
           birthdate,
@@ -80,11 +80,10 @@ export default async function handler(req, res) {
           reading: "Your spiritual insights go here...",
         });
 
-        // Send via email
         await sendEmailWithAttachment({
           to: email,
           subject: '🧘 Your Spiritual Report',
-          html: `<p>Dear ${fullName},<br>Your personalized spiritual report is attached.</p>`,
+          html: `<p>Dear ${fullName},<br>Your spiritual report is attached.</p>`,
           buffer: pdfBuffer,
           filename: 'Spiritual_Report.pdf',
         });
@@ -100,12 +99,11 @@ export default async function handler(req, res) {
         });
       } catch (e) {
         console.error('❌ Server error:', e);
-        return res.status(500).json({ success: false, error: 'Internal server error', details: e.message });
+        return res.status(500).json({ success: false, error: e.message });
       }
     });
-    return; // Important to prevent fallthrough
+    return;
   }
 
-  // --- Method not allowed
   return res.status(405).json({ success: false, error: 'Method not allowed' });
 }
