@@ -4,6 +4,7 @@ import { formidable } from 'formidable';
 import fs from 'fs';
 import { generatePdfBuffer } from './utils/generatePdf.js';
 import { sendEmailWithAttachment } from './utils/sendEmail.js';
+import { generateSpiritualInsights } from './utils/generateInsights.js';
 
 export const config = {
   api: {
@@ -86,19 +87,35 @@ export default async function handler(req, res) {
         const email = fields.email;
 
         // ✅ Generate PDF
+        const { astrology, numerology, palmistry } = await generateSpiritualInsights({
+          fullName,
+          birthdate,
+          birthTime,
+          birthPlace
+        });
+
         const pdfBuffer = await generatePdfBuffer({
           fullName,
           birthdate,
           birthTime,
           birthPlace,
-          reading: "Your spiritual insights go here...",
+          reading: `${astrology}\n\n${numerology}\n\n${palmistry}`,
         });
 
-        // ✅ Send email
         await sendEmailWithAttachment({
           to: email,
           subject: '🧘 Your Spiritual Report',
-          html: `<p>Dear ${fullName},<br>Your spiritual report is attached.</p>`,
+          html: `
+            <p>Dear ${fullName},</p>
+            <p>✨ Here is your personalized spiritual report, generated using advanced astrological, numerological, and palmistry insights.</p>
+            <ul>
+              <li><strong>Astrology:</strong> ${astrology}</li>
+              <li><strong>Numerology:</strong> ${numerology}</li>
+              <li><strong>Palmistry:</strong> ${palmistry}</li>
+            </ul>
+            <p>The full PDF report is attached.</p>
+            <p>– Hazcam Spiritual Systems</p>
+          `,
           buffer: pdfBuffer,
           filename: 'Spiritual_Report.pdf',
         });
@@ -108,9 +125,9 @@ export default async function handler(req, res) {
         return res.status(200).json({
           success: true,
           message: 'Report generated and sent successfully.',
-          astrologySummary: '🌟 Your astrology summary here...',
-          numerologySummary: '🔢 Your numerology summary here...',
-          palmSummary: '✋ Your palm reading summary here...',
+          astrologySummary: astrology,
+          numerologySummary: numerology,
+          palmSummary: palmistry,
         });
 
       } catch (e) {
