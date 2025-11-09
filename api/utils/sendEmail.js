@@ -1,48 +1,38 @@
-// new-/api/utils/sendEmail.js
+// /api/utils/sendEmail.js
+import { Resend } from "resend";
 
-import { Resend } from 'resend';
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function sendEmailWithAttachment({ to, subject, html, buffer, filename }) {
   try {
-    if (!process.env.RESEND_API_KEY) {
-      console.error("❌ RESEND_API_KEY is missing. Email cannot be sent.");
-      throw new Error("Missing RESEND_API_KEY environment variable.");
-    }
-
-    // Initialize Resend client
-    const resend = new Resend(process.env.RESEND_API_KEY);
-
-    console.log("📨 Preparing to send email...");
+    console.log("📨 Sending email via Resend...");
     console.log("To:", to);
     console.log("Subject:", subject);
-    console.log("From:", 'Spiritual Report <sales@hazcam.io>');
-    console.log("Attachment:", filename || 'none');
+    console.log("Attachment:", filename);
 
-    // Construct email payload
-    const emailPayload = {
-      from: 'Spiritual Report <sales@hazcam.io>', // must match verified domain in Resend
+    const emailData = {
+      from: "Hazcam Spiritual <sales@hazcam.io>",
       to,
       subject,
-      html,
+      html, // ✅ HTML body is directly passed as a string
+      attachments: buffer
+        ? [
+            {
+              filename: filename || "Spiritual_Report.pdf",
+              content: buffer.toString("base64"),
+              encoding: "base64",
+              type: "application/pdf",
+            },
+          ]
+        : [],
     };
 
-    // Attach file if provided
-    if (buffer) {
-      emailPayload.attachments = [
-        {
-          filename: filename || 'attachment.pdf',
-          content: buffer, // ✅ Use Buffer directly
-        },
-      ];
-    }
+    const response = await resend.emails.send(emailData);
 
-    // Send email via Resend
-    const response = await resend.emails.send(emailPayload);
-
-    console.log("✅ Email successfully sent via Resend:", response.id || response);
+    console.log("✅ Email sent via Resend:", response);
     return response;
   } catch (error) {
-    console.error("❌ Email sending failed:", error);
+    console.error("❌ Failed to send email via Resend:", error);
     throw error;
   }
 }
