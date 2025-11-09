@@ -1,14 +1,23 @@
 {
   "name": "answers",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node api/spiritual-report.js",
+    "build": "echo '✅ Build complete - Ready for Vercel deploy'"
+  },
   "dependencies": {
-    "openai": "^4.0.0",
+    "@types/node": "^22.8.5",
+    "astronomy-engine": "^2.2.3",
     "formidable": "^3.5.1",
-    "pdfkit": "^0.13.0",
     "get-stream": "^6.0.1",
-    "resend": "^6.4.1",
-    "node-fetch": "^3.3.2"
+    "luxon": "^3.5.0",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.58.1",
+    "pdfkit": "^0.13.0",
+    "resend": "^6.4.1"
+  }
 }
-}
+
 
