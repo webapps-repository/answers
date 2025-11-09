@@ -1,4 +1,4 @@
-// updated /api/spiritual-report.js
+// full updated /api/spiritual-report.js
 
 import { formidable } from "formidable";
 import fs from "fs";
@@ -6,9 +6,7 @@ import OpenAI from "openai";
 import { generatePdfBuffer } from "./utils/generatePdf.js";
 import { sendEmailWithAttachment } from "./utils/sendEmail.js";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export const config = {
   api: {
@@ -17,14 +15,15 @@ export const config = {
 };
 
 export default async function handler(req, res) {
+  // ✅ CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST")
     return res.status(405).json({ success: false, error: "Method not allowed" });
 
+  // ✅ Parse form data
   const form = formidable({ multiples: false, keepExtensions: true });
 
   form.parse(req, async (err, fields, files) => {
@@ -33,11 +32,11 @@ export default async function handler(req, res) {
       return res.status(500).json({ success: false, error: "Form parsing failed" });
     }
 
+    // ✅ Verify reCAPTCHA
     const token = Array.isArray(fields["g-recaptcha-response"])
       ? fields["g-recaptcha-response"][0]
       : fields["g-recaptcha-response"];
 
-    // ✅ Verify reCAPTCHA
     const verify = await fetch("https://www.google.com/recaptcha/api/siteverify", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -56,92 +55,114 @@ export default async function handler(req, res) {
       });
     }
 
+    // ✅ Extract fields
     const fullName = fields.name;
     const birthdate = fields.birthdate;
-    const birthTime = fields.birthtime;
+    const birthTime = fields.birthtime || "Unknown";
     const birthPlace = `${fields.birthcity}, ${fields.birthstate}, ${fields.birthcountry}`;
     const email = fields.email;
+    const question = fields.question || "No question provided.";
+    const submittedAt = new Date().toISOString();
 
     console.log(`✅ Verified user: ${fullName}`);
 
-    // --- 🔮 Generate insights via OpenAI ---
-    async function getInsight(prompt) {
-      try {
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a professional spiritual advisor. Provide clear, personalized insights in 120 words based on astrology, numerology, or palmistry as requested.",
-            },
-            { role: "user", content: prompt },
-          ],
-        });
-        return completion.choices[0].message.content.trim();
-      } catch (e) {
-        console.error("❌ OpenAI generation error:", e);
-        return null;
-      }
+    // --- 🔮 Generate OpenAI combined insights ---
+    let answer = "Could not generate answer.";
+    let astrology = "Could not generate astrology insights.";
+    let numerology = "Could not generate numerology insights.";
+    let palmistry = "Could not generate palmistry insights.";
+
+    try {
+      const prompt = `
+You are a professional spiritual advisor combining astrology, numerology, and palmistry.
+Use the following information to provide a personal answer and insights.
+
+Name: ${fullName}
+Date of Birth: ${birthdate}
+Time of Birth: ${birthTime}
+Birth Place: ${birthPlace}
+Question: ${question}
+Submission Time: ${submittedAt}
+
+Return a JSON response in the format:
+{
+  "answer": "Direct, clear answer to their question.",
+  "astrology": "Personal astrology insights (around 100 words).",
+  "numerology": "Numerology interpretation (around 100 words).",
+  "palmistry": "Palmistry reading (around 100 words)."
+}`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are an expert astrologer, numerologist, and palm reader who provides calm, wise, and insightful guidance.",
+          },
+          { role: "user", content: prompt },
+        ],
+      });
+
+      const responseText = completion.choices[0].message.content || "{}";
+      const json = JSON.parse(responseText);
+      answer = json.answer || answer;
+      astrology = json.astrology || astrology;
+      numerology = json.numerology || numerology;
+      palmistry = json.palmistry || palmistry;
+    } catch (error) {
+      console.error("❌ OpenAI generation error:", error);
     }
 
-    const [astrology, numerology, palmistry] = await Promise.all([
-      getInsight(
-        `Generate an astrology reading for ${fullName}, born on ${birthdate} at ${birthTime || "unknown time"} in ${birthPlace}. Include planetary personality influences.`
-      ),
-      getInsight(
-        `Generate a numerology interpretation for ${fullName}, born ${birthdate}. Include life path number and destiny analysis.`
-      ),
-      getInsight(
-        `Generate a palmistry reading for ${fullName}, focusing on life line, heart line, and career potential.`
-      ),
-    ]);
-
-    const reading = {
-      astrology: astrology || "Could not generate astrology insights.",
-      numerology: numerology || "Could not generate numerology insights.",
-      palmistry: palmistry || "Could not generate palmistry insights.",
-    };
-
-    // --- 🧘 Generate PDF ---
+    // --- 🧘 Generate PDF with full report ---
     const pdfBuffer = await generatePdfBuffer({
       fullName,
       birthdate,
       birthTime,
       birthPlace,
-      reading,
+      question,
+      answer,
+      astrology,
+      numerology,
+      palmistry,
     });
 
-    // --- ✉️ Create full HTML email body ---
+    // --- ✉️ Build email body (includes question + answer first) ---
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 650px; margin: auto;">
-        <h2 style="text-align:center; color:#6c63ff;">🔮 Your Spiritual Report</h2>
+        <h2 style="text-align:center; color:#6c63ff;">🔮 Your Spiritual Report & Answer</h2>
 
         <div style="background:#f9f9f9; padding:1rem; border-radius:10px; margin-bottom:1.2rem;">
           <p><strong>📧 Email:</strong> ${email}</p>
           <p><strong>🧑 Name:</strong> ${fullName}</p>
           <p><strong>📅 Birth Date:</strong> ${birthdate}</p>
-          <p><strong>⏰ Birth Time:</strong> ${birthTime || "Unknown"}</p>
+          <p><strong>⏰ Birth Time:</strong> ${birthTime}</p>
           <p><strong>🌍 Birth Place:</strong> ${birthPlace}</p>
+          <p><strong>💭 Question:</strong> ${question}</p>
+        </div>
+
+        <h3 style="color:#444;">💫 Answer</h3>
+        <div style="background:#eef3ff;padding:0.8rem;border-radius:8px;margin-bottom:1rem;">
+          ${answer}
         </div>
 
         <h3 style="color:#444;">✨ Astrology Insights</h3>
         <div style="background:#f7f7f7;padding:0.8rem;border-radius:8px;margin-bottom:1rem;">
-          ${reading.astrology}
+          ${astrology}
         </div>
 
         <h3 style="color:#444;">🔢 Numerology Insights</h3>
         <div style="background:#f7f7f7;padding:0.8rem;border-radius:8px;margin-bottom:1rem;">
-          ${reading.numerology}
+          ${numerology}
         </div>
 
         <h3 style="color:#444;">✋ Palmistry Insights</h3>
         <div style="background:#f7f7f7;padding:0.8rem;border-radius:8px;margin-bottom:1rem;">
-          ${reading.palmistry}
+          ${palmistry}
         </div>
 
         <p style="margin-top:20px; font-size:0.95rem; color:#555;">
-          ✅ A full detailed PDF report has been attached to this email.
+          ✅ A full detailed PDF report is attached to this email.
         </p>
 
         <p style="margin-top:1.5rem; text-align:center; color:#777;">
@@ -153,55 +174,21 @@ export default async function handler(req, res) {
     // --- 📧 Send Email ---
     await sendEmailWithAttachment({
       to: email,
-      subject: "🧘 Your Spiritual Report",
-      html: `
-        <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 650px; margin: auto;">
-          <h2 style="text-align:center; color:#6c63ff;">🔮 Your Spiritual Report</h2>
-    
-          <div style="background:#f9f9f9; padding:1rem; border-radius:10px; margin-bottom:1.2rem;">
-            <p><strong>📧 Email:</strong> ${email}</p>
-            <p><strong>🧑 Name:</strong> ${fullName}</p>
-            <p><strong>📅 Birth Date:</strong> ${birthdate}</p>
-            <p><strong>⏰ Birth Time:</strong> ${birthTime || "Unknown"}</p>
-            <p><strong>🌍 Birth Place:</strong> ${birthPlace}</p>
-          </div>
-    
-          <h3 style="color:#444;">✨ Astrology Insights</h3>
-          <div style="background:#f7f7f7;padding:0.8rem;border-radius:8px;margin-bottom:1rem;">
-            ${reading.astrology}
-          </div>
-    
-          <h3 style="color:#444;">🔢 Numerology Insights</h3>
-          <div style="background:#f7f7f7;padding:0.8rem;border-radius:8px;margin-bottom:1rem;">
-            ${reading.numerology}
-          </div>
-    
-          <h3 style="color:#444;">✋ Palmistry Insights</h3>
-          <div style="background:#f7f7f7;padding:0.8rem;border-radius:8px;margin-bottom:1rem;">
-            ${reading.palmistry}
-          </div>
-    
-          <p style="margin-top:20px; font-size:0.95rem; color:#555;">
-            ✅ A full detailed PDF report has been attached to this email.
-          </p>
-    
-          <p style="margin-top:1.5rem; text-align:center; color:#777;">
-            <em>— Hazcam Spiritual Systems ✨</em>
-          </p>
-        </div>
-      `,
+      subject: "🔮 Your Spiritual Report & Answer",
+      html: htmlBody,
       buffer: pdfBuffer,
       filename: "Spiritual_Report.pdf",
     });
 
     console.log(`✅ Report emailed to ${email}`);
 
+    // --- ✅ Return JSON for frontend summaries ---
     return res.status(200).json({
       success: true,
-      message: "Report generated successfully.",
-      astrologySummary: reading.astrology,
-      numerologySummary: reading.numerology,
-      palmSummary: reading.palmistry,
+      answer,
+      astrologySummary: astrology,
+      numerologySummary: numerology,
+      palmSummary: palmistry,
     });
   });
 }
