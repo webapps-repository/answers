@@ -1,9 +1,17 @@
 // tabular /api/utils/generatePdf.js
 
-
 import PDFDocument from "pdfkit";
 import getStream from "get-stream";
 import { pdfmetrics } from "pdfkit/js/data/core";
+
+// ✅ Dynamically import pdfkit (avoids ESM resolution errors)
+let PDFDocument;
+try {
+  PDFDocument = (await import("pdfkit")).default;
+} catch (err) {
+  console.error("❌ Failed to load pdfkit:", err);
+  throw err;
+}
 
 export async function generatePdfBuffer({
   fullName,
@@ -11,14 +19,17 @@ export async function generatePdfBuffer({
   birthTime,
   birthPlace,
   question,
-  reading = {},
+  answer,
+  astrology,
+  numerology,
+  palmistry,
 }) {
   const doc = new PDFDocument({ margin: 50 });
   const chunks = [];
 
   doc.on("data", (chunk) => chunks.push(chunk));
   doc.on("end", () => console.log("✅ PDF generation complete"));
-
+  
   // --- Title ---
   doc
     .fontSize(22)
