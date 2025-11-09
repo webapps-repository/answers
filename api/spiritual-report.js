@@ -22,7 +22,6 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   if (req.method === "OPTIONS") return res.status(200).end();
-
   if (req.method !== "POST")
     return res.status(405).json({ success: false, error: "Method not allowed" });
 
@@ -113,24 +112,49 @@ export default async function handler(req, res) {
       reading,
     });
 
+    // --- ✉️ Create full HTML email body ---
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 650px; margin: auto;">
+        <h2 style="text-align:center; color:#6c63ff;">🔮 Your Spiritual Report</h2>
+
+        <div style="background:#f9f9f9; padding:1rem; border-radius:10px; margin-bottom:1.2rem;">
+          <p><strong>📧 Email:</strong> ${email}</p>
+          <p><strong>🧑 Name:</strong> ${fullName}</p>
+          <p><strong>📅 Birth Date:</strong> ${birthdate}</p>
+          <p><strong>⏰ Birth Time:</strong> ${birthTime || "Unknown"}</p>
+          <p><strong>🌍 Birth Place:</strong> ${birthPlace}</p>
+        </div>
+
+        <h3 style="color:#444;">✨ Astrology Insights</h3>
+        <div style="background:#f7f7f7;padding:0.8rem;border-radius:8px;margin-bottom:1rem;">
+          ${reading.astrology}
+        </div>
+
+        <h3 style="color:#444;">🔢 Numerology Insights</h3>
+        <div style="background:#f7f7f7;padding:0.8rem;border-radius:8px;margin-bottom:1rem;">
+          ${reading.numerology}
+        </div>
+
+        <h3 style="color:#444;">✋ Palmistry Insights</h3>
+        <div style="background:#f7f7f7;padding:0.8rem;border-radius:8px;margin-bottom:1rem;">
+          ${reading.palmistry}
+        </div>
+
+        <p style="margin-top:20px; font-size:0.95rem; color:#555;">
+          ✅ A full detailed PDF report has been attached to this email.
+        </p>
+
+        <p style="margin-top:1.5rem; text-align:center; color:#777;">
+          <em>— Hazcam Spiritual Systems ✨</em>
+        </p>
+      </div>
+    `;
+
     // --- 📧 Send Email ---
     await sendEmailWithAttachment({
       to: email,
       subject: "🧘 Your Spiritual Report",
-      html: `
-        <div style="font-family:Arial,sans-serif;color:#333;">
-          <h2>✨ Your Personalized Spiritual Report</h2>
-          <p>Dear ${fullName},</p>
-          <p>Here is your complete spiritual reading based on your birth details.</p>
-          <ul>
-            <li><strong>Astrology:</strong> ${reading.astrology.slice(0, 80)}...</li>
-            <li><strong>Numerology:</strong> ${reading.numerology.slice(0, 80)}...</li>
-            <li><strong>Palmistry:</strong> ${reading.palmistry.slice(0, 80)}...</li>
-          </ul>
-          <p>The full PDF report is attached below.</p>
-          <p style="margin-top:16px;">– Hazcam Spiritual Systems ✨</p>
-        </div>
-      `,
+      html: htmlBody,
       buffer: pdfBuffer,
       filename: "Spiritual_Report.pdf",
     });
