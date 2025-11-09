@@ -17,9 +17,7 @@
     "openai": "^4.58.1",
     "pdfkit": "^0.15.0",
     "resend": "^6.4.1"
-  },
-  "vercel": {
-  "installCommand": "npm install pdfkit get-stream --legacy-peer-deps"
+  }
 }
 
 
