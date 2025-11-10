@@ -1,7 +1,4 @@
 // /api/spiritual-report.js
-// /api/spiritual-report.js
-// /api/spiritual-report.js
-
 import { formidable } from "formidable";
 import fs from "fs";
 import OpenAI from "openai";
@@ -27,10 +24,10 @@ export default async function handler(req, res) {
       return res.status(500).json({ success: false, error: "Form parsing failed" });
     }
 
+    // === reCAPTCHA Verification ===
     const token = Array.isArray(fields["g-recaptcha-response"])
       ? fields["g-recaptcha-response"][0]
       : fields["g-recaptcha-response"];
-
     const verify = await fetch("https://www.google.com/recaptcha/api/siteverify", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -48,6 +45,7 @@ export default async function handler(req, res) {
       });
     }
 
+    // === Extract User Data ===
     const userData = {
       fullName: fields.name,
       email: fields.email,
@@ -60,12 +58,27 @@ export default async function handler(req, res) {
 
     console.log(`✅ Verified user: ${userData.fullName}`);
 
-    // === 🔮 OpenAI Combined JSON ===
+    // === 🔮 OpenAI JSON Prompt with Canonical Numerology Meanings ===
     let result = {};
     try {
       const prompt = `
-You are an expert spiritual analyst specializing in astrology, numerology, and palmistry.
-You will answer the user's question using insights from all three disciplines.
+You are an expert spiritual analyst combining astrology, numerology, and palmistry.
+Provide a deeply personalized reading that answers the user's question.
+
+Use standard numerology interpretations for these numbers:
+
+1 – Leadership, individuality, ambition
+2 – Harmony, diplomacy, sensitivity
+3 – Creativity, self-expression, optimism
+4 – Practicality, discipline, structure
+5 – Freedom, adaptability, adventure
+6 – Responsibility, nurturing, family focus
+7 – Introspection, analysis, spirituality
+8 – Power, ambition, material success
+9 – Compassion, idealism, humanitarianism
+11 – Intuition, inspiration, visionary
+22 – Master builder, manifestation, achievement
+33 – Universal teacher, empathy, enlightenment
 
 User:
 - Name: ${userData.fullName}
@@ -75,9 +88,10 @@ User:
 - Question: ${userData.question}
 - Submission Time: ${userData.submittedAt}
 
-Respond ONLY in valid JSON format with the following structure:
+Respond in **valid JSON** format only:
+
 {
-  "answer": "Short, cohesive synthesis answering their question, derived from astrology, numerology, and palmistry summaries.",
+  "answer": "Short synthesized answer to their question, integrating insights from astrology, numerology, and palmistry.",
   "astrology": {
     "summary": "Short paragraph relevant to the user's question.",
     "Planetary Positions": "...",
@@ -90,14 +104,14 @@ Respond ONLY in valid JSON format with the following structure:
   },
   "numerology": {
     "summary": "Short paragraph relevant to the question asked.",
-    "Life Path": { "number": "5", "meaning": "..." },
-    "Expression": { "number": "7", "meaning": "..." },
-    "Personality": { "number": "3", "meaning": "..." },
-    "Soul Urge": { "number": "9", "meaning": "..." },
-    "Maturity": { "number": "11", "meaning": "..." }
+    "Life Path": { "number": "5", "meaning": "You are curious, adaptable, and thrive on freedom..." },
+    "Expression": { "number": "3", "meaning": "Creative and communicative, expressing through art or words..." },
+    "Personality": { "number": "8", "meaning": "Projecting confidence and ambition, driven by tangible success..." },
+    "Soul Urge": { "number": "9", "meaning": "Compassionate and idealistic, guided by altruistic purpose..." },
+    "Maturity": { "number": "11", "meaning": "Deep intuitive wisdom and leadership through inspiration..." }
   },
   "palmistry": {
-    "summary": "Short paragraph relevant to the question asked.",
+    "summary": "Short paragraph relevant to the user's question.",
     "Life Line": "...",
     "Head Line": "...",
     "Heart Line": "...",
@@ -115,7 +129,7 @@ Respond ONLY in valid JSON format with the following structure:
         model: "gpt-4o-mini",
         temperature: 0.8,
         messages: [
-          { role: "system", content: "You are an expert spiritual analyst producing JSON reports for astrology, numerology, and palmistry." },
+          { role: "system", content: "You are an expert spiritual analyst producing structured JSON reports with consistent numerological interpretations." },
           { role: "user", content: prompt },
         ],
       });
@@ -140,18 +154,16 @@ Respond ONLY in valid JSON format with the following structure:
     // === Email Send ===
     await sendEmailWithAttachment({
       to: userData.email,
-      subject: "🔮 Your Spiritual Report and Personalized Guidance",
+      subject: "Your Full Spiritual Report",
       html: `
-        <h2>Your Spiritual Report</h2>
+        <h2>Your Personalized Report</h2>
         <p><strong>Question:</strong> ${userData.question}</p>
         <p>${result.answer}</p>
-        <p>Attached is your detailed report.</p>
+        <p>Attached is your detailed PDF report.</p>
       `,
       buffer: pdfBuffer,
       filename: "Spiritual_Report.pdf",
     });
-
-    console.log(`✅ Report emailed to ${userData.email}`);
 
     res.status(200).json({
       success: true,
