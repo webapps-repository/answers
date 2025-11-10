@@ -11,15 +11,32 @@ export const config = {
   api: { bodyParser: false },
 };
 
-// ✅ Simple date formatter for PDF + Email
-function formatDate(dateStr) {
-  if (!dateStr) return "—";
-  const [year, month, day] = dateStr.split("-");
-  return `${day}-${month}-${year}`;
+// ✅ Date normalizer — ensures consistent dd-mm-yyyy format before PDF
+function normalizeDate(dateStr) {
+  try {
+    if (!dateStr) return "";
+    if (dateStr instanceof Date) {
+      return dateStr.toISOString().split("T")[0];
+    }
+    if (typeof dateStr === "string") {
+      const parts = dateStr.match(/\d+/g);
+      if (!parts) return dateStr;
+      if (parts.length === 3) {
+        const [y, m, d] =
+          dateStr.includes("-") && dateStr.indexOf("-") === 4
+            ? [parts[0], parts[1], parts[2]]
+            : [parts[2], parts[1], parts[0]];
+        return `${y}-${m}-${d}`;
+      }
+    }
+    return String(dateStr);
+  } catch {
+    return String(dateStr);
+  }
 }
 
 export default async function handler(req, res) {
-  // --- CORS Headers ---
+  // --- CORS ---
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -63,7 +80,7 @@ export default async function handler(req, res) {
     const userData = {
       fullName: fields.name,
       email: fields.email,
-      birthdate: fields.birthdate,
+      birthdate: normalizeDate(fields.birthdate),
       birthTime: fields.birthtime || "Unknown",
       birthPlace: `${fields.birthcity}, ${fields.birthstate}, ${fields.birthcountry}`,
       question: fields.question || "No question provided.",
@@ -77,36 +94,73 @@ export default async function handler(req, res) {
     let astrology = "No astrology insights available.";
     let numerology = "No numerology insights available.";
     let palmistry = "No palmistry insights available.";
+    let astroDetails = {};
+    let numDetails = {};
+    let palmDetails = {};
 
     try {
       const prompt = `
-You are a professional spiritual advisor skilled in astrology, numerology, and palmistry.
-Use the following user details to provide a detailed answer to their question.
+You are an advanced spiritual advisor skilled in astrology, numerology (Pythagorean method), and palmistry.
+Use the following user details to produce a structured report.
+Respond in JSON format matching this schema exactly:
+
+{
+  "answer": "Short paragraph answer to their question (relevant to question context).",
+  "astrology": "Short paragraph connecting astrology to their question.",
+  "numerology": "Short paragraph connecting numerology to their question.",
+  "palmistry": "Short paragraph connecting palmistry to their question.",
+  "astroDetails": {
+    "Planetary Positions": "...",
+    "Ascendant (Rising) Zodiac Sign": "...",
+    "Astrological Houses": "...",
+    "Family Astrology": "...",
+    "Love Governing House": "...",
+    "Health & Wellbeing": "...",
+    "Career & Business": "..."
+  },
+  "numDetails": {
+    "Life Path": "... include number and its meaning ...",
+    "Expression": "... include number and its meaning ...",
+    "Personality": "... include number and its meaning ...",
+    "Soul Urge": "... include number and its meaning ...",
+    "Maturity": "... include number and its meaning ..."
+  },
+  "palmDetails": {
+    "Life Line": "...",
+    "Head Line": "...",
+    "Heart Line": "...",
+    "Fate Line": "...",
+    "Thumb": "...",
+    "Index Finger": "...",
+    "Ring Finger": "...",
+    "Mounts": "... include which mounts are prominent and meanings ...",
+    "Marriage / Relationship": "... include how many lines and possible timelines ...",
+    "Children": "... include number of children indicated and traits ...",
+    "Travel Lines": "... include domestic/international and possible timelines ...",
+    "Stress Lines": "..."
+  }
+}
 
 User:
-- Name: ${userData.fullName}
-- Date of Birth: ${userData.birthdate}
-- Time of Birth: ${userData.birthTime}
-- Birth Place: ${userData.birthPlace}
-- Question: ${userData.question}
-
-Respond in this JSON format:
-{
-  "answer": "Direct short answer (50–100 words)",
-  "astrology": "Astrology summary paragraph relevant to their question",
-  "numerology": "Numerology summary paragraph relevant to their question",
-  "palmistry": "Palmistry summary paragraph relevant to their question"
-}`;
+Name: ${userData.fullName}
+Date of Birth: ${userData.birthdate}
+Time of Birth: ${userData.birthTime}
+Birth Place: ${userData.birthPlace}
+Question: ${userData.question}
+Submission Time: ${userData.submittedAt}
+`;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
-            content: "You are an expert astrologer, numerologist, and palm reader providing precise and concise insights.",
+            content:
+              "You are a structured, factual spiritual analyst who formats output as clean JSON without markdown.",
           },
           { role: "user", content: prompt },
         ],
+        temperature: 0.8,
       });
 
       const jsonText = completion.choices[0]?.message?.content || "{}";
@@ -116,11 +170,14 @@ Respond in this JSON format:
       astrology = parsed.astrology || astrology;
       numerology = parsed.numerology || numerology;
       palmistry = parsed.palmistry || palmistry;
+      astroDetails = parsed.astroDetails || {};
+      numDetails = parsed.numDetails || {};
+      palmDetails = parsed.palmDetails || {};
     } catch (err) {
       console.error("❌ OpenAI generation error:", err);
     }
 
-    // === PDF Generation ===
+    // === Generate PDF ===
     const pdfBuffer = await generatePdfBuffer({
       fullName: userData.fullName,
       birthdate: userData.birthdate,
@@ -131,44 +188,27 @@ Respond in this JSON format:
       astrology,
       numerology,
       palmistry,
+      astroDetails,
+      numDetails,
+      palmDetails,
     });
 
-    // === Email Body ===
+    // === Email Content ===
     const htmlBody = `
-      <div style="font-family: Arial, sans-serif; color: #333; max-width: 700px; margin: auto; line-height: 1.6;">
-        <h2 style="text-align:center; color:#6c63ff;">🔮 Your Personalized Spiritual Report</h2>
-
-        <div style="background:#f7f7f7; padding:1rem; border-radius:10px; margin-bottom:1.5rem;">
-          <p><strong>📧 Email:</strong> ${userData.email}</p>
-          <p><strong>🧑 Name:</strong> ${userData.fullName}</p>
-          <p><strong>📅 Birth Date:</strong> ${formatDate(userData.birthdate)}</p>
-          <p><strong>⏰ Birth Time:</strong> ${userData.birthTime}</p>
-          <p><strong>🌍 Birth Place:</strong> ${userData.birthPlace}</p>
-          <p><strong>💭 Question:</strong> ${userData.question}</p>
-        </div>
-
-        <h3 style="color:#4B0082;">Answer</h3>
+      <div style="font-family:Arial, sans-serif;color:#333;max-width:700px;margin:auto;line-height:1.6;">
+        <h2 style="text-align:center;color:#6c63ff;">Your Personalized Spiritual Report</h2>
+        <p><strong>Name:</strong> ${userData.fullName}</p>
+        <p><strong>Date of Birth:</strong> ${userData.birthdate}</p>
+        <p><strong>Time of Birth:</strong> ${userData.birthTime}</p>
+        <p><strong>Birth Place:</strong> ${userData.birthPlace}</p>
+        <p><strong>Question:</strong> ${userData.question}</p>
+        <hr/>
         <p>${answer}</p>
-
-        <h3 style="color:#4B0082;">Astrology</h3>
-        <p>${astrology}</p>
-
-        <h3 style="color:#4B0082;">Numerology</h3>
-        <p>${numerology}</p>
-
-        <h3 style="color:#4B0082;">Palmistry</h3>
-        <p>${palmistry}</p>
-
-        <p style="margin-top:20px; font-size:0.9rem; color:#555;">
-          ✅ Your full detailed report is attached as a PDF.
-        </p>
-        <p style="text-align:center; margin-top:1.2rem; color:#777;">
-          — Hazcam Spiritual Systems ✨
-        </p>
+        <p><em>Your detailed report is attached as a PDF.</em></p>
+        <p style="text-align:center;color:#777;">— Hazcam Spiritual Systems</p>
       </div>
     `;
 
-    // === Send Email ===
     await sendEmailWithAttachment({
       to: userData.email,
       subject: "🔮 Your Full Spiritual Report",
@@ -183,9 +223,9 @@ Respond in this JSON format:
       success: true,
       message: "Report generated successfully.",
       answer,
-      astrologySummary: astrology,
-      numerologySummary: numerology,
-      palmSummary: palmistry,
+      astrology,
+      numerology,
+      palmistry,
     });
   });
 }
