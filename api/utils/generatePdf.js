@@ -1,5 +1,6 @@
 // /api/utils/generatePdf.js
 import getStream from "get-stream";
+
 let PDFDocument;
 try {
   PDFDocument = (await import("pdfkit")).default;
@@ -8,109 +9,65 @@ try {
   throw err;
 }
 
-function drawSectionHeading(doc, title) {
-  const bottom = doc.page.height - doc.page.margins.bottom;
-  if (doc.y + 40 > bottom) doc.addPage();
-  doc.moveDown(0.3)
-     .fontSize(16)
-     .fillColor("#4B0082")
-     .text(title, { underline: true })
-     .moveDown(0.6);
-}
-
-function drawParagraph(doc, text, size = 12) {
-  const bottom = doc.page.height - doc.page.margins.bottom;
-  if (doc.y + 60 > bottom) doc.addPage();
-  doc.fontSize(size)
-     .fillColor("#333")
-     .text(text || "—", { align: "justify", lineGap: 6 })
-     .moveDown(1.0);
-}
-
-function drawTwoColTable(doc, rows, opts = {}) {
-  const { left = 50, col1Width = 200, col2Width = 340, rowHeight = 26 } = opts;
-  const bottom = doc.page.height - doc.page.margins.bottom;
-  rows.forEach((row, i) => {
-    if (doc.y + rowHeight > bottom - 20) doc.addPage();
-    if (i % 2 === 0) doc.save().rect(left, doc.y, col1Width + col2Width, rowHeight).fill("#F8F8FF").restore();
-    doc.fontSize(12)
-       .fillColor("#111")
-       .text(row[0] || "", left + 6, doc.y + 6, { width: col1Width - 10 })
-       .text(row[1] || "", left + col1Width + 10, doc.y + 6, { width: col2Width - 16, lineGap: 6 });
-    doc.y += rowHeight;
-  });
-  doc.moveDown(1.0);
+// ✅ Simple date formatter
+function formatDate(dateStr) {
+  if (!dateStr) return "—";
+  const [year, month, day] = dateStr.split("-");
+  return `${day}-${month}-${year}`;
 }
 
 export async function generatePdfBuffer({
-  fullName, birthdate, birthTime, birthPlace, question,
-  answer, astrology, numerology, palmistry,
-  astroDetails = {}, numDetails = {}, palmDetails = {}
+  fullName,
+  birthdate,
+  birthTime,
+  birthPlace,
+  question,
+  answer,
+  astrology,
+  numerology,
+  palmistry,
 }) {
   const doc = new PDFDocument({ margin: 50 });
   const chunks = [];
+
   doc.on("data", (c) => chunks.push(c));
-  doc.on("end", () => console.log("✅ PDF generated"));
+  doc.on("end", () => console.log("✅ PDF generation complete"));
 
-  doc.fontSize(22).fillColor("#4B0082")
-     .text("Personal Spiritual Report (Western Astrology / Pythagorean Numerology)", { align: "center" })
-     .moveDown(1.0);
+  // Title
+  doc
+    .fontSize(22)
+    .fillColor("#4B0082")
+    .text("Personal Spiritual Report", { align: "center" })
+    .moveDown(1.0);
 
+  // Personal details
   doc.fontSize(12).fillColor("#111");
   doc.text(`Name: ${fullName || "—"}`);
-  doc.text(`Date of Birth: ${birthdate || "—"}`);
+  doc.text(`Date of Birth: ${formatDate(birthdate)}`);
   doc.text(`Time of Birth: ${birthTime || "Unknown"}`);
-  doc.text(`Place of Birth: ${birthPlace || "—"}`);
-  doc.text(`Question: ${question || "—"}`).moveDown(1.0);
+  doc.text(`Birth Place: ${birthPlace || "—"}`);
+  doc.text(`Question: ${question || "—"}`).moveDown(1.2);
 
-  drawSectionHeading(doc, "Answer to Your Question");
-  drawParagraph(doc, answer);
+  // Answer
+  doc.fontSize(16).fillColor("#4B0082").text("Answer").moveDown(0.4);
+  doc.fontSize(12).fillColor("#000").text(answer || "No answer available.").moveDown(1);
 
-  drawSectionHeading(doc, "Astrology (Western System)");
-  drawParagraph(doc, astrology);
-  drawTwoColTable(doc, [
-    ["Planetary Positions", astroDetails["Planetary Positions"] || "—"],
-    ["Ascendant (Rising) Zodiac Sign", astroDetails["Ascendant (Rising) Zodiac Sign"] || "—"],
-    ["Astrological Houses", astroDetails["Astrological Houses"] || "—"],
-    ["Family Astrology", astroDetails["Family Astrology"] || "—"],
-    ["Love Governing House in Astrology", astroDetails["Love Governing House in Astrology"] || "—"],
-    ["Health & Wellbeing Predictions", astroDetails["Health & Wellbeing Predictions"] || "—"],
-    ["Astrological influences on Work, Career and Business",
-      astroDetails["Astrological influences on Work, Career and Business"] || "—"],
-  ]);
+  // Astrology
+  doc.fontSize(16).fillColor("#4B0082").text("Astrology").moveDown(0.4);
+  doc.fontSize(12).fillColor("#000").text(astrology || "No astrology data.").moveDown(1);
 
-  drawSectionHeading(doc, "Numerology (Pythagorean System)");
-  drawParagraph(doc, numerology);
+  // Numerology
+  doc.fontSize(16).fillColor("#4B0082").text("Numerology").moveDown(0.4);
+  doc.fontSize(12).fillColor("#000").text(numerology || "No numerology data.").moveDown(1);
 
-  const vals = numDetails._values || {};
-  [
-    ["Life Path Number", "Life Path Number", vals.lifePath],
-    ["Expression Number", "Expression Number", vals.expression],
-    ["Personality Number", "Personality Number", vals.personality],
-    ["Soul Urge Number", "Soul Urge Number", vals.soulUrge],
-    ["Maturity Number", "Maturity Number", vals.maturity],
-  ].forEach(([label, key, num]) => {
-    doc.fontSize(14).fillColor("#4B0082").text(`${label} (${num ?? "?"})`, { underline: true }).moveDown(0.3);
-    doc.fontSize(12).fillColor("#333").text(numDetails[key] || "—", { align: "justify", lineGap: 6 });
-    doc.moveDown(1.0);
-  });
+  // Palmistry
+  doc.fontSize(16).fillColor("#4B0082").text("Palmistry").moveDown(0.4);
+  doc.fontSize(12).fillColor("#000").text(palmistry || "No palmistry data.").moveDown(1.5);
 
-  drawSectionHeading(doc, "Palmistry");
-  drawParagraph(doc, palmistry);
-  drawTwoColTable(doc, [
-    ["Life Line", palmDetails["Life Line"] || "—"],
-    ["Head Line", palmDetails["Head Line"] || "—"],
-    ["Heart Line", palmDetails["Heart Line"] || "—"],
-    ["Fate Line", palmDetails["Fate Line"] || "—"],
-    ["Fingers", palmDetails["Fingers"] || "—"],
-    ["Mounts", palmDetails["Mounts"] || "—"],
-    ["Marriage/Relationships", palmDetails["Marriage/Relationships"] || "—"],
-    ["Children", palmDetails["Children"] || "—"],
-    ["Travel Lines", palmDetails["Travel Lines"] || "—"],
-  ]);
-
-  doc.moveDown(1.0).fontSize(10).fillColor("#777")
-     .text("Generated by Hazcam Spiritual Systems — Western astrology and Pythagorean numerology.", { align: "center" });
+  doc
+    .fontSize(10)
+    .fillColor("#777")
+    .text("This report is for entertainment purposes only.", { align: "center" });
 
   doc.end();
   return await getStream.buffer(doc);
