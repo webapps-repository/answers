@@ -1,196 +1,167 @@
-// latest pdfgen
-
+// /api/utils/generatePdf.js
 import getStream from "get-stream";
 
-// ✅ Safe dynamic import for Vercel
+// Dynamic import (Vercel-safe)
 let PDFDocument;
 try {
-  PDFDocument = (await import("pdfkit")).default;
+  PDFDocument = (await import("pdfkit")).default; // pdfkit ^0.17.x
 } catch (err) {
-  console.error("❌ Failed to load PDFKit:", err);
+  console.error("Failed to load PDFKit:", err);
   throw err;
 }
 
-// ✅ Helper to safely stringify any value (fixes [object Object])
-function stringify(value) {
-  if (value === undefined || value === null) return "";
-  if (typeof value === "object") {
-    try {
-      return Object.entries(value)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join(", ");
-    } catch {
-      return JSON.stringify(value);
-    }
-  }
-  return String(value);
+// ~1.5 line spacing effect
+const LINE_GAP = 6;
+
+function maybePageBreak(doc, needed = 48) {
+  const bottom = doc.page.height - doc.page.margins.bottom;
+  if (doc.y + needed > bottom) doc.addPage();
 }
 
-// ===== Helper Functions =====
-function drawSectionHeading(doc, title) {
-  const pageBottom = doc.page.height - doc.page.margins.bottom;
-  if (doc.y + 40 > pageBottom) doc.addPage();
-
+function heading(doc, text) {
+  maybePageBreak(doc, 48);
   doc
-    .moveDown(0.3)
-    .fontSize(16)
+    .moveDown(0.2)
+    .fontSize(18)
     .fillColor("#4B0082")
-    .text(title, { underline: true })
-    .moveDown(0.6);
+    .text(text, { underline: true })
+    .moveDown(0.4);
 }
 
-function drawParagraph(doc, text, size = 12, color = "#333") {
-  const pageBottom = doc.page.height - doc.page.margins.bottom;
-  if (doc.y + 40 > pageBottom) doc.addPage();
-
+function subheading(doc, text) {
+  maybePageBreak(doc, 32);
   doc
-    .fontSize(size)
-    .fillColor(color)
-    .lineGap(6) // increased line spacing ~1.5x
-    .text(stringify(text) || "—")
-    .moveDown(1.0);
+    .fontSize(13)
+    .fillColor("#4B0082")
+    .text(text)
+    .moveDown(0.1);
 }
 
-function drawTwoColTable(doc, rows, opts = {}) {
-  const {
-    left = 50,
-    top = doc.y,
-    col1Width = 200,
-    col2Width = 340,
-    rowHeight = 28,
-    stripeColor = "#F8F8FF",
-    textSize = 11,
-  } = opts;
+function paragraph(doc, text = "") {
+  maybePageBreak(doc, 64);
+  doc
+    .fontSize(12)
+    .fillColor("#222")
+    .text(text || "—", { lineGap: LINE_GAP })
+    .moveDown(0.2);
+}
 
-  const pageBottom = doc.page.height - doc.page.margins.bottom;
-
-  rows.forEach((row, i) => {
-    const y = doc.y;
-    const neededHeight = rowHeight;
-
-    if (y + neededHeight > pageBottom - 20) doc.addPage();
-
-    // alternate shading
-    if (i % 2 === 0) {
-      doc.save().rect(left, y, col1Width + col2Width, rowHeight).fill(stripeColor).restore();
-    }
-
-    const label = stringify(row[0]);
-    const value = stringify(row[1]);
-
-    doc
-      .fontSize(textSize)
-      .fillColor("#000")
-      .text(label, left + 6, y + 6, { width: col1Width - 12 })
-      .text(value, left + col1Width + 10, y + 6, { width: col2Width - 16 });
-
-    doc.y = y + rowHeight;
+function detailsBlock(doc, kvPairs = []) {
+  kvPairs.forEach(([label, value]) => {
+    maybePageBreak(doc, 28);
+    doc.fontSize(12).fillColor("#222")
+      .text(`${label}: ${value || "—"}`, { lineGap: LINE_GAP });
   });
-
-  doc.moveDown(1.2);
+  doc.moveDown(0.4);
 }
 
-// ===== Main PDF Export =====
+const nz = (v, d="") => (v == null ? d : String(v));
+const numTitle = (label, block) => {
+  if (block && typeof block === "object") {
+    const n = nz(block.number);
+    return n ? `${label}: ${n}` : label;
+  }
+  return label;
+};
+const numMeaning = (block) => {
+  if (block && typeof block === "object") return nz(block.meaning);
+  return nz(block);
+};
+
 export async function generatePdfBuffer({
   fullName,
   birthdate,
   birthTime,
   birthPlace,
   question,
+
+  // narrative content from OpenAI (structured)
   answer,
-  astrology,
-  numerology,
-  palmistry,
-  astroDetails = {},
-  numDetails = {},
-  palmDetails = {},
+  astrology = {},
+  numerology = {},
+  palmistry = {},
 }) {
   const doc = new PDFDocument({ margin: 50 });
   const chunks = [];
-
   doc.on("data", (c) => chunks.push(c));
-  doc.on("end", () => console.log("✅ PDF generation complete"));
+  doc.on("end", () => console.log("PDF generation complete"));
 
-  // ===== Title =====
+  // Title (no icons, centered)
   doc
     .fontSize(22)
     .fillColor("#4B0082")
-    .text("Your Question — Personalized Spiritual Report", { align: "center" })
-    .moveDown(1.2);
+    .text("Personal Spiritual Report", { align: "center" })
+    .moveDown(0.8);
 
-  // ===== User Info =====
-  doc.fontSize(12).fillColor("#111").lineGap(6);
-  doc.text(`Name: ${fullName || "—"}`);
-  doc.text(`Date of Birth: ${birthdate || "—"}`);
-  doc.text(`Time of Birth: ${birthTime || "Unknown"}`);
-  doc.text(`Birth Place: ${birthPlace || "—"}`);
-  doc.text(`Question: ${question || "—"}`).moveDown(1.2);
+  // Details (full width)
+  detailsBlock(doc, [
+    ["Name", fullName],
+    ["Date of Birth", birthdate],
+    ["Time of Birth", birthTime || "Unknown"],
+    ["Birth Place", birthPlace],
+    ["Question", question || "—"],
+  ]);
 
-  // ===== Answer =====
-  drawSectionHeading(doc, "Answer to Your Question");
-  drawParagraph(doc, answer || "No answer available.");
+  // Answer
+  heading(doc, "Answer to Your Question");
+  paragraph(doc, answer);
 
-  // ===== Astrology =====
-  drawSectionHeading(doc, "Astrology");
-  drawParagraph(doc, astrology || "Astrological interpretation unavailable.");
+  // Astrology section (summary + full-width sub-sections)
+  heading(doc, "Astrology");
+  paragraph(doc, nz(astrology.summary));
+  subheading(doc, "Planetary Positions"); paragraph(doc, nz(astrology.planetaryPositions));
+  subheading(doc, "Ascendant (Rising)");  paragraph(doc, nz(astrology.ascendant));
+  subheading(doc, "Houses");               paragraph(doc, nz(astrology.houses));
+  subheading(doc, "Family");               paragraph(doc, nz(astrology.family));
+  subheading(doc, "Love");                 paragraph(doc, nz(astrology.loveHouse));
+  subheading(doc, "Health & Wellbeing");   paragraph(doc, nz(astrology.health));
+  subheading(doc, "Work, Career & Business"); paragraph(doc, nz(astrology.career));
 
-  const astrologyRows = [
-    ["Planetary Positions", astroDetails["Planetary Positions"] || "See summary above."],
-    ["Ascendant (Rising) Zodiac Sign", astroDetails["Ascendant (Rising) Zodiac Sign"] || "See summary above."],
-    ["Astrological Houses", astroDetails["Astrological Houses"] || "See summary above."],
-    ["Family Astrology", astroDetails["Family Astrology"] || "See summary above."],
-    ["Love Governing House in Astrology", astroDetails["Love Governing House in Astrology"] || "See summary above."],
-    ["Health & Wellbeing Predictions", astroDetails["Health & Wellbeing Predictions"] || "See summary above."],
-    ["Astrological influences on Work, Career and Business",
-      astroDetails["Astrological influences on Work, Career and Business"] || "See summary above."],
-  ];
+  // Numerology section
+  heading(doc, "Numerology");
+  paragraph(doc, nz(numerology.summary));
 
-  drawTwoColTable(doc, astrologyRows);
+  subheading(doc, numTitle("Life Path", numerology.lifePath));
+  paragraph(doc, numMeaning(numerology.lifePath));
 
-  // ===== Numerology =====
-  drawSectionHeading(doc, "Numerology");
-  drawParagraph(doc, numerology || "Numerology interpretation unavailable.");
+  subheading(doc, numTitle("Expression", numerology.expression));
+  paragraph(doc, numMeaning(numerology.expression));
 
-  const numerologyRows = [
-    [`Life Path Number ${stringify(numDetails["Life Path Number Value"] || "")}`,
-      numDetails["Life Path Number"] || "See summary above."],
-    [`Expression Number ${stringify(numDetails["Expression Number Value"] || "")}`,
-      numDetails["Expression Number"] || "See summary above."],
-    [`Personality Number ${stringify(numDetails["Personality Number Value"] || "")}`,
-      numDetails["Personality Number"] || "See summary above."],
-    [`Soul Urge Number ${stringify(numDetails["Soul Urge Number Value"] || "")}`,
-      numDetails["Soul Urge Number"] || "See summary above."],
-    [`Maturity Number ${stringify(numDetails["Maturity Number Value"] || "")}`,
-      numDetails["Maturity Number"] || "See summary above."],
-  ];
+  subheading(doc, numTitle("Personality", numerology.personality));
+  paragraph(doc, numMeaning(numerology.personality));
 
-  drawTwoColTable(doc, numerologyRows);
+  subheading(doc, numTitle("Soul Urge", numerology.soulUrge));
+  paragraph(doc, numMeaning(numerology.soulUrge));
 
-  // ===== Palmistry =====
-  drawSectionHeading(doc, "Palmistry");
-  drawParagraph(doc, palmistry || "Palmistry interpretation unavailable.");
+  subheading(doc, numTitle("Maturity", numerology.maturity));
+  paragraph(doc, numMeaning(numerology.maturity));
 
-  const palmistryRows = [
-    ["Life Line", palmDetails["Life Line"] || "Vitality and stamina; long and deep shows resilience."],
-    ["Head Line", palmDetails["Head Line"] || "Intellect and focus; deep shows clarity, wavy indicates creativity."],
-    ["Heart Line", palmDetails["Heart Line"] || "Emotional depth and balance; breaks suggest shifts in relationships."],
-    ["Fate Line", palmDetails["Fate Line"] || "Career and destiny; deep indicates purpose, breaks show changes."],
-    ["Fingers", palmDetails["Fingers"] || "Thumb=willpower, Index=ambition, Middle=discipline, Ring=creativity, Pinky=communication."],
-    ["Mounts", palmDetails["Mounts"] || "Jupiter=leadership, Venus=love, Luna=intuition — highlights key traits."],
-    ["Marriage / Relationship Lines", palmDetails["Marriage / Relationship Lines"] || "Shows number and timeline of relationships or marriage events."],
-    ["Children", palmDetails["Children"] || "Indicates potential number and gender energy of children."],
-    ["Travel Lines", palmDetails["Travel Lines"] || "Represents journeys — domestic or international — and their timing."],
-    ["Prominent Mounts", palmDetails["Prominent Mounts"] || "Identifies most pronounced mounts revealing key life themes."],
-  ];
+  // Palmistry section (full set including your added detail)
+  heading(doc, "Palmistry");
+  paragraph(doc, nz(palmistry.summary));
 
-  drawTwoColTable(doc, palmistryRows);
+  subheading(doc, "Life Line");        paragraph(doc, nz(palmistry.lifeLine));
+  subheading(doc, "Head Line");        paragraph(doc, nz(palmistry.headLine));
+  subheading(doc, "Heart Line");       paragraph(doc, nz(palmistry.heartLine));
+  subheading(doc, "Fate Line");        paragraph(doc, nz(palmistry.fateLine));
+  subheading(doc, "Thumb");            paragraph(doc, nz(palmistry.thumb));
+  subheading(doc, "Index Finger");     paragraph(doc, nz(palmistry.indexFinger));
+  subheading(doc, "Middle Finger");    paragraph(doc, nz(palmistry.middleFinger));
+  subheading(doc, "Ring Finger");      paragraph(doc, nz(palmistry.ringFinger));
+  subheading(doc, "Pinky Finger");     paragraph(doc, nz(palmistry.pinkyFinger));
+  subheading(doc, "Mounts (overall)"); paragraph(doc, nz(palmistry.mounts));
+  subheading(doc, "Prominent Mounts"); paragraph(doc, nz(palmistry.prominentMounts));
+  subheading(doc, "Marriage / Relationship"); paragraph(doc, nz(palmistry.marriageTimeline));
+  subheading(doc, "Children");         paragraph(doc, nz(palmistry.childrenCount));
+  subheading(doc, "Travel Lines");     paragraph(doc, nz(palmistry.travelDetails));
+  subheading(doc, "Stress Lines");     paragraph(doc, nz(palmistry.stressLines));
 
-  // ===== Footer =====
+  // Footer
   doc
-    .moveDown(1.0)
+    .moveDown(0.6)
     .fontSize(10)
-    .fillColor("#777")
-    .text("✨ Generated by Hazcam Spiritual Systems — combining astrology, numerology, and palmistry for personal insight.", {
+    .fillColor("#666")
+    .text("This report is for informational and entertainment purposes only.", {
       align: "center",
     });
 
