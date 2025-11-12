@@ -1,84 +1,141 @@
-<style>
-.spiritual-form{max-width:760px;margin:2rem auto;padding:1.6rem;background:#fff;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.06);font-family:sans-serif;}
-.spiritual-form h2{text-align:center;color:#4B0082;margin-bottom:1rem}
-.field-row{display:flex;gap:.8rem;flex-wrap:wrap}
-.field-col{flex:1 1 220px;min-width:180px}
-input,textarea,select{width:100%;padding:.6rem;border:1px solid #ddd;border-radius:8px;font-size:1rem}
-.btn{background:#6c63ff;color:#fff;padding:.9rem 1.1rem;border:none;border-radius:10px;cursor:pointer;font-weight:600}
-.progress-bar{height:8px;background:#eee;border-radius:8px;overflow:hidden;margin-top:.8rem}
-.progress{height:100%;width:0;background:linear-gradient(90deg,#6c63ff,#8c7cff);transition:width .3s linear}
-#spinner{display:none;color:#6c63ff;margin-top:.5rem;text-align:center}
-.summary-box{background:#f7f7fb;padding:.9rem;border-radius:8px;margin-top:1rem}
-.toast{display:none;position:fixed;right:20px;bottom:20px;background:#fff;padding:12px 16px;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.12)}
-</style>
+// Personal vs Non-personal report flow + OpenAI + Email + PDF
+import { formidable } from "formidable";
+import OpenAI from "openai";
+import { generatePdfBuffer } from "./utils/generatePdf.js";
+import { sendEmailWithAttachment } from "./utils/sendEmail.js";
 
-<div class="spiritual-form">
-  <h2>Your Question</h2>
-  <form id="spiritual-form" enctype="multipart/form-data">
-    <label><b>Your Question</b> — up to 25 words</label>
-    <textarea id="question" name="question" maxlength="200"></textarea>
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
-    <div id="personal-fields" style="display:none;margin-top:10px">
-      <div class="field-row">
-        <div class="field-col"><label>Email</label><input type="email" id="email" name="email" required></div>
-        <div class="field-col"><label>Full Name</label><input id="name" name="name"></div>
-      </div>
-      <div class="field-row"><div class="field-col"><label>Date of Birth (DD-MM-YYYY)</label><input id="birthdate" name="birthdate"></div>
-        <div class="field-col"><label>Time of Birth (HH:MM)</label><input id="birthtime" name="birthtime"></div></div>
-      <div class="field-row"><div class="field-col"><label>City</label><input id="birthcity" name="birthcity"></div>
-        <div class="field-col"><label>State</label><input id="birthstate" name="birthstate"></div>
-        <div class="field-col"><label>Country</label><input id="birthcountry" name="birthcountry"></div></div>
-      <div><label>Upload Right Palm Image (optional)</label><input type="file" id="palmImage" name="palmImage" accept="image/*"></div>
-    </div>
+export const config = { api: { bodyParser: false } };
 
-    <div id="g-recaptcha" class="g-recaptcha" style="margin-top:10px"></div>
-    <button class="btn" id="submit-btn" type="submit">Submit</button>
-    <div class="progress-bar"><div id="progress" class="progress"></div></div>
-    <div id="spinner">Generating report... ⏳</div>
-  </form>
-
-  <div id="summary" style="display:none">
-    <h3 style="color:#4B0082;margin-top:1rem">✨ Short Answer</h3>
-    <div class="summary-box" id="answer-box"></div>
-    <button class="btn" id="get-detail" style="background:#4caf50;margin-top:.5rem">Get Free Report (no payment needed)</button>
-  </div>
-</div>
-
-<div class="toast" id="toast">Your detailed answer has been emailed.</div>
-
-<script src="https://www.google.com/recaptcha/api.js?onload=initRecaptcha&render=explicit" async defer></script>
-<script>
-function initRecaptcha(){
-  const el=document.getElementById("g-recaptcha");
-  if(el&&!el.hasChildNodes()){
-    grecaptcha.render(el,{sitekey:"YOUR_RECAPTCHA_SITE_KEY",theme:"light"});
-  }
+// ---------------- Helpers ----------------
+function safeStr(x, f = "") {
+  if (x == null) return f;
+  if (Array.isArray(x)) return String(x[0] ?? f);
+  return String(x);
 }
-document.addEventListener("DOMContentLoaded",initRecaptcha);
+function toIsoFromDDMMYYYY(d) {
+  if (!d || typeof d !== "string") return "";
+  const [dd, mm, yyyy] = d.split("-").map((p) => p.trim());
+  return yyyy && mm && dd ? `${yyyy}-${mm}-${dd}` : d;
+}
+function epochIso() { return new Date().toISOString(); }
 
-(function(){
-const f=document.getElementById("spiritual-form"),
-btn=document.getElementById("submit-btn"),
-prog=document.getElementById("progress"),
-spin=document.getElementById("spinner"),
-sum=document.getElementById("summary"),
-ans=document.getElementById("answer-box"),
-getDet=document.getElementById("get-detail"),
-toast=document.getElementById("toast");
+// Simple local classifier (fallback)
+function fallbackClassify(q) {
+  const t = (q || "").toLowerCase();
+  const personalHints = ["my ","should i","will i","born","relationship","love","career","health","astrology","numerology","palm"];
+  return { type: personalHints.some((k)=>t.includes(k))?"personal":"technical", confidence:0.5, source:"fallback" };
+}
+async function classifyQuestion(question){
+  if(!openai) return fallbackClassify(question);
+  try{
+    const prompt=`Classify strictly as JSON {"type":"personal"|"technical","confidence":number}. Question:"""${question}"""`;
+    const r=await openai.chat.completions.create({
+      model:"gpt-4o-mini",
+      messages:[{role:"system",content:"Return JSON only"},{role:"user",content:prompt}],
+      temperature:0
+    });
+    const txt=r.choices?.[0]?.message?.content?.trim()||"{}";
+    const p=JSON.parse(txt);
+    if(p.type==="personal"||p.type==="technical")return p;
+    return fallbackClassify(question);
+  }catch{return fallbackClassify(question);}
+}
 
-async function anim(pct){prog.style.width=pct+"%";}
-function spinShow(b){spin.style.display=b?"block":"none";}
+// ---------------- Numerology (Pythagorean) ----------------
+const MAP={A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,I:9,J:1,K:2,L:3,M:4,N:5,O:6,P:7,Q:8,R:9,S:1,T:2,U:3,V:4,W:5,X:6,Y:7,Z:8};
+const onlyL=s=>s.toUpperCase().replace(/[^A-Z]/g,"");
+const onlyV=s=>s.toUpperCase().replace(/[^AEIOUY]/g,"");
+const onlyC=s=>s.toUpperCase().replace(/[^A-Z]|[AEIOUY]/g,"");
+const reduce=n=>{while(n>9&&![11,22,33].includes(n))n=String(n).split("").reduce((a,d)=>a+(+d||0),0);return n;};
+const nameSum=s=>reduce([...onlyL(s)].reduce((a,ch)=>a+(MAP[ch]||0),0));
+const soulUrge=s=>reduce([...onlyV(s)].reduce((a,ch)=>a+(MAP[ch]||0),0));
+const personality=s=>reduce([...onlyC(s)].reduce((a,ch)=>a+(MAP[ch]||0),0));
+const lifePath=d=>reduce([...d.replace(/\D/g,"")].reduce((a,v)=>a+(+v||0),0));
+const maturity=(lp,ex)=>reduce(+lp+ +ex);
 
-f.addEventListener("submit",async e=>{
-e.preventDefault();btn.disabled=true;await anim(30);spinShow(true);
-const fd=new FormData(f);try{fd.append("g-recaptcha-response",grecaptcha.getResponse());}catch{}
-const r=await fetch("/api/spiritual-report",{method:"POST",body:fd});
-const j=await r.json();await anim(95);
-ans.innerText=j.answer||"No answer.";sum.style.display="block";
-if(j.type==="personal")document.getElementById("personal-fields").style.display="block";
-await anim(100);spinShow(false);btn.disabled=false;
-});
+// ---------------- AI helpers ----------------
+async function aiJson(sys,user,fallback={}){
+  if(!openai)return fallback;
+  try{
+    const r=await openai.chat.completions.create({model:"gpt-4o-mini",messages:[{role:"system",content:sys},{role:"user",content:user}],temperature:0.4});
+    return JSON.parse(r.choices?.[0]?.message?.content?.trim()||"{}");
+  }catch{return fallback;}
+}
 
-getDet.addEventListener("click",()=>{toast.style.display="block";setTimeout(()=>toast.style.display="none",4000);});
-})();
-</script>
+// ---------------- Handler ----------------
+export default async function handler(req,res){
+  res.setHeader("Access-Control-Allow-Origin","*");
+  res.setHeader("Access-Control-Allow-Methods","POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers","Content-Type");
+  if(req.method==="OPTIONS")return res.status(200).end();
+  if(req.method!=="POST")return res.status(405).end();
+
+  const form=formidable({multiples:false,keepExtensions:true});
+  form.parse(req,async(err,fields)=>{
+    if(err)return res.status(500).json({success:false,error:"form parse"});
+
+    const q=safeStr(fields.question);
+    const email=safeStr(fields.email);
+    const name=safeStr(fields.name);
+    const bdateIso=toIsoFromDDMMYYYY(safeStr(fields.birthdate));
+    const btime=safeStr(fields.birthtime,"Unknown");
+    const bplace=[safeStr(fields.birthcity),safeStr(fields.birthstate),safeStr(fields.birthcountry)].filter(Boolean).join(", ");
+
+    const cls=await classifyQuestion(q);
+    const personal=cls.type==="personal";
+
+    let answer,astro,num,palm;
+    let numPack={};
+
+    if(personal){
+      const lp=lifePath(bdateIso);
+      const ex=nameSum(name);
+      const per=personality(name);
+      const so=soulUrge(name);
+      const ma=maturity(lp,ex);
+      numPack={lifePath:lp,expression:ex,personality:per,soulUrge:so,maturity:ma};
+
+      const js=await aiJson("Return JSON only",`
+Return JSON:
+{"answer":"","astrologySummary":"","numerologySummary":"","palmistrySummary":""}
+User:${name}, DOB:${bdateIso}, Time:${btime}, Place:${bplace}
+Question:${q}`);
+      answer=js.answer||"Here are your insights.";
+      astro=js.astrologySummary||"Astrology summary unavailable.";
+      num=js.numerologySummary||"Numerology summary unavailable.";
+      palm=js.palmistrySummary||"Palmistry summary unavailable.";
+    }else{
+      const js=await aiJson("Return JSON only",`
+Return JSON:{"answer":"","keyPoints":[],"notes":""}
+Question:${q}`);
+      answer=js.answer||"Here is your concise answer.";
+      numPack={technicalKeyPoints:js.keyPoints||[],technicalNotes:js.notes||""};
+      astro=num=palm="";
+    }
+
+    const pdf=await generatePdfBuffer({
+      headerBrand:"Melodies Web",title:"Your Answer",mode:personal?"personal":"technical",
+      question:q,answer,
+      fullName:name,birthdate:safeStr(fields.birthdate),birthTime:btime,birthPlace:bplace,
+      astrologySummary:astro,numerologySummary:num,palmistrySummary:palm,
+      numerologyPack:numPack
+    });
+
+    if(email){
+      await sendEmailWithAttachment({
+        to:email,
+        subject:"Your Answer",
+        html:`<div style="font-family:sans-serif;max-width:700px;margin:auto">
+        <h2 style="text-align:center">Melodies Web</h2><h3 style="text-align:center">Your Answer</h3>
+        <p><b>Question:</b> ${q}</p><p>${answer}</p><p><i>A detailed PDF is attached.</i></p></div>`,
+        buffer:pdf,filename:"Your_Answer.pdf"
+      });
+    }
+
+    res.json({success:true,type:personal?"personal":"technical",answer,astrologySummary:astro,numerologySummary:num,palmSummary:palm});
+  });
+}
