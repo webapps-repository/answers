@@ -1,5 +1,8 @@
 // /api/spiritual-report.js
 // Handles form input, classifies question, generates AI summary, PDF, and sends via Resend.
+// /api/spiritual-report.js
+// /api/spiritual-report.js
+// /api/spiritual-report.js
 
 import { formidable } from "formidable";
 import OpenAI from "openai";
