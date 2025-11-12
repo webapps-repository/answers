@@ -1,7 +1,4 @@
 //
-//
-//
-
 import { formidable } from "formidable";
 import OpenAI from "openai";
 import { generatePdfBuffer } from "./utils/generatePdf.js";
