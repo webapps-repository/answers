@@ -24,6 +24,7 @@ export default async function handler(req,res){
   const resend=resendKey?new Resend(resendKey):null;
   const openai=openaiKey?new OpenAI({apiKey:openaiKey}):null;
 
+  // --- catch errors ---
   } catch (err) {
     console.error("❌ Selftest crashed:", err);
     return res.status(500).json({
