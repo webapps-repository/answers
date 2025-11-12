@@ -1,43 +1,21 @@
-// new-/api/test-email.js
-
-import { sendEmailWithAttachment } from './utils/sendEmail.js';
+// test-email.js — Quick endpoint to test Resend mail delivery
+import { sendEmailWithResend } from "./utils/sendEmail.js";
 
 export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  const to = process.env.TEST_EMAIL_TO || "dev@melodiesweb.io";
+
   try {
-    console.log("🚀 Starting test email endpoint...");
-
-    // HTML body of email
-    const htmlContent = `
-      <div style="font-family:Arial, sans-serif; color:#333;">
-        <h2>✨ Spiritual Report Email Test</h2>
-        <p>This is a <strong>test email</strong> sent from your deployed Vercel function.</p>
-        <p>If you receive this, your email sending system via Resend works correctly ✅</p>
-        <p style="margin-top:16px;">– The Hazcam Spiritual Report System</p>
-      </div>
-    `;
-
-    // Send the email using the shared utility
-    const response = await sendEmailWithAttachment({
-      to: 'henrycvalk@proton.me',
-      subject: '📧 Test Email from Hazcam Spiritual Report',
-      html: htmlContent,
-      buffer: Buffer.from('Attachment test successful.\nThis confirms attachments are functional.'),
-      filename: 'test_attachment.txt',
+    await sendEmailWithResend({
+      to,
+      subject: "Test Email from Melodies Web",
+      html: "<p>This is a test email via Resend API integration.</p>",
     });
-
-    console.log("✅ Email sent successfully via Resend:", response);
-
-    return res.status(200).json({
-      success: true,
-      message: "✅ Test email sent successfully.",
-      resendResponse: response,
-    });
-  } catch (error) {
-    console.error("❌ Email send failed:", error);
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-      details: error,
-    });
+    res.json({ success: true, to });
+  } catch (err) {
+    console.error("Test email error:", err);
+    res.status(500).json({ success: false, error: err.message });
   }
 }
