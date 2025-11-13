@@ -35,7 +35,15 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST")   return res.status(405).json({ error: "Method not allowed" });
 
-  const form = formidable({ multiples: false, keepExtensions: true });
+  const form = formidable({multiples: false, keepExtensions: true,
+
+  // FIX: allow optional image upload fields
+  allowEmptyFiles: true,
+  minFileSize: 0,  
+
+  // also increases compatibility with Shopify forms
+  maxFileSize: 10 * 1024 * 1024, // 10MB
+});
 
   try {
     form.parse(req, async (err, fields, files) => {
@@ -43,6 +51,9 @@ export default async function handler(req, res) {
         console.error("formidable parse error:", err);
         return res.status(500).json({ error: "Form parsing failed" });
       }
+      
+      const palmImage = files.palmImage;
+      const palmImagePath = palmImage && palmImage.size > 0 ? palmImage.filepath : null;
 
       // reCAPTCHA
       const token = safe(fields["g-recaptcha-response"]);
