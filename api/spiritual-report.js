@@ -48,8 +48,12 @@ export default async function handler(req, res) {
   try {
     form.parse(req, async (err, fields, files) => {
       if (err) {
-        console.error("formidable parse error:", err);
-        return res.status(500).json({ error: "Form parsing failed" });
+        console.error("❌ formidable parse error:", err);
+        return res.status(400).json({
+          success: false,
+          error: "File upload error",
+          detail: err.message,
+        });
       }
       
       const palmImage = files.palmImage;
