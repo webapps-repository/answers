@@ -1,4 +1,3 @@
-// classify-question.js — Classify user question as "personal" or "technical" using OpenAI
 import OpenAI from "openai";
 
 const openai = process.env.OPENAI_API_KEY
@@ -9,8 +8,8 @@ export async function classifyQuestion(question = "") {
   const fallback = () => {
     const q = question.toLowerCase();
     const personalHints = [
-      "my", "should i", "will i", "born", "relationship", "marriage",
-      "career", "health", "love", "life", "astrology", "numerology", "palm"
+      "my","should i","will i","born","relationship",
+      "marriage","career","health","love","life","astrology","numerology","palm"
     ];
     return personalHints.some((k) => q.includes(k)) ? "personal" : "technical";
   };
@@ -20,12 +19,12 @@ export async function classifyQuestion(question = "") {
   try {
     const prompt = `
 Classify this question as "personal" or "technical".
-- personal = about an individual's life, love, health, or destiny.
-- technical = logical, scientific, business, finance, or data.
+personal = about an individual's life, destiny, love, or health.
+technical = analytical, scientific, or factual.
 
 Question: """${question}"""
-Return JSON like {"type":"personal"} or {"type":"technical"} only.
-`;
+Return JSON: {"type":"personal"} or {"type":"technical"}.`;
+
     const r = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
