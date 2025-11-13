@@ -1,26 +1,21 @@
-// Melodies Web – Resend Email Utility
 import { Resend } from "resend";
-const resend = new Resend(process.env.RESEND_API_KEY);
 
-export async function sendEmailWithResend({
-  to,
-  subject,
-  html,
-  buffer,
-  filename = "Your_Answer.pdf",
-}) {
-  try {
-    await resend.emails.send({
-      from: "Melodies Web <noreply@melodiesweb.io>",
-      to,
-      subject,
-      html,
-      attachments: buffer
-        ? [{ filename, content: buffer.toString("base64") }]
-        : [],
-    });
-    console.log("📨 Resend email sent to", to);
-  } catch (err) {
-    console.error("❌ Resend email error:", err);
-  }
+export async function sendEmailHTML({ to, subject, html, attachments = [] }) {
+  const key = process.env.RESEND_API_KEY;
+  const from = process.env.FROM_EMAIL;
+  if (!key || !from) throw new Error("Resend not configured (RESEND_API_KEY / FROM_EMAIL).");
+
+  const resend = new Resend(key);
+  const r = await resend.emails.send({
+    from,
+    to,
+    subject,
+    html,
+    attachments: attachments.length ? attachments.map(a => ({
+      filename: a.filename,
+      content: a.buffer.toString("base64"),
+    })) : undefined,
+  });
+  if (r.error) throw new Error(`Resend error: ${r.error.message || "unknown"}`);
+  return r;
 }
