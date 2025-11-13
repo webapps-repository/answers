@@ -1,127 +1,141 @@
+// Core handler (CORS + reCAPTCHA + classify + insights + PDF + email)
 import { formidable } from "formidable";
-import OpenAI from "openai";
-import { generatePdfBuffer } from "./utils/generatePdf.js";
-import { sendEmailWithResend } from "./utils/sendEmail.js";
-import { verifyRecaptcha } from "./utils/verifyRecaptcha.js";
-import { classifyQuestion } from "./utils/classifyQuestion.js";
-import { generateInsights } from "./utils/generateInsights.js";
-
-// OpenAI optional
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
+import { classifyQuestion } from "./utils/classify-question.js";
+import { verifyRecaptcha } from "./utils/verify-recaptcha.js";
+import { personalSummaries, technicalSummary } from "./utils/generate-insights.js";
+import { generatePdfBuffer } from "./utils/generate-pdf.js";
+import { sendEmailHTML } from "./utils/send-email.js";
 
 export const config = { api: { bodyParser: false } };
 
-// Helper: safe string
-function safeStr(v, d = "") {
-  if (v == null) return d;
-  if (Array.isArray(v)) return v[0] ?? d;
-  return String(v);
-}
-
-// Helper: convert dd-mm-yyyy → yyyy-mm-dd
-function toIsoDate(d) {
-  if (!d) return "";
-  const parts = d.split("-");
-  return parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : d;
-}
-
-// Numerology calculator (Pythagorean)
-const MAP = {
-  A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,I:9,
-  J:1,K:2,L:3,M:4,N:5,O:6,P:7,Q:8,R:9,
-  S:1,T:2,U:3,V:4,W:5,X:6,Y:7,Z:8
+// helpers
+const safe = (v, d = "") => (v == null ? d : Array.isArray(v) ? String(v[0] ?? d) : String(v));
+const toISO = (ddmmyyyy) => {
+  const s = safe(ddmmyyyy);
+  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : s;
 };
-const reduce = (n)=>{while(n>9&&![11,22,33].includes(n))n=String(n).split("").reduce((a,b)=>a+ +b,0);return n;};
-const only = (s,f)=>[...s.toUpperCase().replace(/[^A-Z]/g,"")].filter(f);
-const val = (arr)=>reduce(arr.reduce((a,c)=>a+(MAP[c]||0),0));
-const numerology = (name,dob)=>({
-  lifePath: reduce([...dob.replace(/\D/g,"")].reduce((a,b)=>a+ +b,0)),
-  expression: val(only(name,()=>true)),
-  personality: val(only(name,(c)=>!"AEIOUY".includes(c))),
-  soulUrge: val(only(name,(c)=>"AEIOUY".includes(c))),
-});
 
-// Main API handler
+// numerology (local, pythagorean)
+const MAP = {A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,I:9,J:1,K:2,L:3,M:4,N:5,O:6,P:7,Q:8,R:9,S:1,T:2,U:3,V:4,W:5,X:6,Y:7,Z:8};
+const reduce = (n)=>{ while(n>9 && ![11,22,33].includes(n)) n=String(n).split("").reduce((a,b)=>a+(+b||0),0); return n; };
+const letters = s => (s||"").toUpperCase().replace(/[^A-Z]/g,"");
+const vowels  = s => (s||"").toUpperCase().replace(/[^AEIOUY]/g,"");
+const cons    = s => (s||"").toUpperCase().replace(/[^A-Z]|[AEIOUY]/g,"");
+const sumName = s => reduce(letters(s).split("").reduce((t,c)=>t+(MAP[c]||0),0));
+const sumV    = s => reduce(vowels(s).split("").reduce((t,c)=>t+(MAP[c]||0),0));
+const sumC    = s => reduce(cons(s).split("").reduce((t,c)=>t+(MAP[c]||0),0));
+const life    = iso => reduce((iso||"").replace(/\D/g,"").split("").reduce((t,d)=>t+(+d||0),0));
+
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  // CORS
+  res.setHeader("Access-Control-Allow-Origin", "*"); // tighten later
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ success: false, error: "Method not allowed" });
+  if (req.method !== "POST")   return res.status(405).json({ error: "Method not allowed" });
 
-  const form = formidable({ multiples: false });
-  form.parse(req, async (err, fields) => {
-    if (err) return res.status(500).json({ success: false, error: "Form parse error" });
+  const form = formidable({ multiples: false, keepExtensions: true });
 
-    // Recaptcha verify
-    try {
-      const token = safeStr(fields["g-recaptcha-response"]);
-      const recaptchaOk = await verifyRecaptcha(token);
-      if (!recaptchaOk.success) return res.status(403).json({ success: false, error: "reCAPTCHA failed" });
-    } catch (e) {
-      console.error("Recaptcha error:", e);
-    }
+  try {
+    form.parse(req, async (err, fields, files) => {
+      if (err) {
+        console.error("formidable parse error:", err);
+        return res.status(500).json({ error: "Form parsing failed" });
+      }
 
-    const q = safeStr(fields.question);
-    const name = safeStr(fields.name);
-    const email = safeStr(fields.email);
-    const dobIso = toIsoDate(safeStr(fields.birthdate));
-    const btime = safeStr(fields.birthtime);
-    const place = [safeStr(fields.birthcity), safeStr(fields.birthstate), safeStr(fields.birthcountry)].filter(Boolean).join(", ");
+      // reCAPTCHA
+      const token = safe(fields["g-recaptcha-response"]);
+      const rc = await verifyRecaptcha(token);
+      if (!rc.ok) {
+        return res.status(403).json({ error: "reCAPTCHA verification failed", details: rc });
+      }
 
-    const type = await classifyQuestion(q);
+      // inputs
+      const question  = safe(fields.question).trim();
+      const email     = safe(fields.email).trim();
+      const fullName  = safe(fields.name).trim();
+      const birthDDMM = safe(fields.birthdate);
+      const birthISO  = toISO(birthDDMM);
+      const birthTime = safe(fields.birthtime, "Unknown");
+      const birthPlace = [safe(fields.birthcity), safe(fields.birthstate), safe(fields.birthcountry)]
+        .filter(Boolean).join(", ");
 
-    let answer = "", astro = "", numText = "", palm = "";
-    let numerics = {};
+      // classify
+      const cls = await classifyQuestion(question);
+      const isPersonal = cls.type === "personal";
 
-    if (type === "personal") {
-      numerics = numerology(name, dobIso);
-      const insight = await generateInsights({ question: q, name, dobIso, numerics });
-      answer = insight.answer;
-      astro = insight.astro;
-      numText = insight.numerology;
-      palm = insight.palm;
-    } else {
-      answer = "Here is your concise technical answer. Data-driven logic applies.";
-      astro = "";
-      numText = "";
-      palm = "";
-    }
+      // numerology pack
+      let numerologyPack = {};
+      if (isPersonal) {
+        const lp = life(birthISO);
+        const expr = sumName(fullName);
+        const pers = sumC(fullName);
+        const soul = sumV(fullName);
+        const mat  = reduce(lp + expr);
+        numerologyPack = { lifePath: lp, expression: expr, personality: pers, soulUrge: soul, maturity: mat };
+      }
 
-    const pdf = await generatePdfBuffer({
-      headerBrand: "Melodies Web",
-      title: "Your Answer",
-      mode: type,
-      question: q,
-      answer,
-      fullName: name,
-      birthdate: fields.birthdate,
-      birthTime: btime,
-      birthPlace: place,
-      astrologySummary: astro,
-      numerologySummary: numText,
-      palmistrySummary: palm,
-      numerologyPack: numerics,
-    });
+      // insights
+      let answer = "", astrologySummary = "", numerologySummary = "", palmistrySummary = "";
+      if (isPersonal) {
+        const s = await personalSummaries({
+          fullName, birthISO, birthTime, birthPlace, question, numerologyPack
+        });
+        answer = s.answer || "Here is your personal answer.";
+        astrologySummary  = s.astrologySummary  || "";
+        numerologySummary = s.numerologySummary || "";
+        palmistrySummary  = s.palmistrySummary  || "";
+      } else {
+        const t = await technicalSummary(question);
+        answer = t.answer || "Here is a concise answer.";
+        numerologyPack = {
+          technicalKeyPoints: Array.isArray(t.keyPoints) ? t.keyPoints : [],
+          technicalNotes: t.notes || "",
+        };
+      }
 
-    if (email)
-      await sendEmailWithResend({
-        to: email,
-        subject: "Your Answer",
-        html: `<p>Your detailed answer is attached.</p>`,
-        buffer: pdf,
-        filename: "Your_Answer.pdf",
+      // PDF
+      const pdf = await generatePdfBuffer({
+        headerBrand: "Melodies Web",
+        titleText: "Your Answer",
+        mode: isPersonal ? "personal" : "technical",
+        question, answer,
+        fullName, birthdate: birthDDMM, birthTime, birthPlace,
+        astrologySummary, numerologySummary, palmistrySummary,
+        numerologyPack
       });
 
-    res.json({
-      success: true,
-      type,
-      answer,
-      astrologySummary: astro,
-      numerologySummary: numText,
-      palmistrySummary: palm,
+      // Email (if provided)
+      if (email) {
+        const html = `
+          <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:720px;margin:auto;color:#222;line-height:1.55">
+            <h2 style="text-align:center;margin:0 0 8px 0;">Melodies Web</h2>
+            <h3 style="text-align:center;margin:0 0 16px 0;">Your Answer</h3>
+            <p><b>Question:</b> ${question || "—"}</p>
+            <p>${answer}</p>
+            <p style="color:#666;font-size:13px;margin-top:16px;">Your detailed PDF is attached.</p>
+          </div>`;
+        await sendEmailHTML({
+          to: email,
+          subject: "Your Answer",
+          html,
+          attachments: [{ filename: "Your_Answer.pdf", buffer: pdf }],
+        });
+      }
+
+      // Web response
+      return res.status(200).json({
+        success: true,
+        type: isPersonal ? "personal" : "technical",
+        answer,
+        astrologySummary,
+        numerologySummary,
+        palmistrySummary,
+      });
     });
-  });
+  } catch (e) {
+    console.error("unhandled error:", e);
+    return res.status(500).json({ error: "Server error", detail: String(e?.message || e) });
+  }
 }
