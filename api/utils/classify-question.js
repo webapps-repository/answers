@@ -1,57 +1,52 @@
 // /api/utils/classify-question.js
-
 import OpenAI from "openai";
-
 let openai=null;
-if (process.env.OPENAI_API_KEY)
+if(process.env.OPENAI_API_KEY){
   openai=new OpenAI({apiKey:process.env.OPENAI_API_KEY});
-
-function fallback(q){
-  const s=(q||"").toLowerCase();
-  const hints=[
-    "my","me","should i","will i","love","relationship","born","date of birth",
-    "astrology","numerology","palm","future","career","health"
-  ];
-  return {
-    type: hints.some(k=>s.includes(k)) ? "personal":"technical",
-    confidence:0.55,
-    source:"fallback"
-  };
 }
 
 export async function classifyQuestion(question){
-  if (!openai) return fallback(question);
+  const q=(question||"").toLowerCase();
 
-  try {
-    const prompt = `
-Return ONLY JSON:
+  // fallback
+  const fallback=()=>{
+    const personalHints=["my","i ","should i","love","health","career","future","born","birth"];
+    return {
+      type: personalHints.some(h=>q.includes(h))?"personal":"technical",
+      confidence:0.55,
+      source:"fallback"
+    };
+  };
+
+  if(!openai) return fallback();
+
+  try{
+    const prompt=`
+Return JSON:
 {
-  "type": "personal" | "technical",
-  "confidence": number
+ "type":"personal"|"technical",
+ "confidence": number
 }
 
-Question: "${question}"
+Classify this question:
+"${question}"
 `;
 
-    const r = await openai.chat.completions.create({
-      model:"gpt-4o",
-      temperature:0,
+    const r=await openai.chat.completions.create({
+      model:"gpt-4o-mini",
+      temperature:0.0,
       messages:[
-        {role:"system",content:"Return valid JSON only."},
+        {role:"system",content:"JSON only."},
         {role:"user",content:prompt}
       ]
     });
 
-    const txt=r.choices[0].message.content.trim();
-    const obj=JSON.parse(txt);
+    const text=r.choices[0].message.content.trim();
+    const parsed=JSON.parse(text);
+    return parsed;
 
-    if (obj.type==="personal"||obj.type==="technical")
-      return {...obj,source:"openai"};
-
-    return fallback(question);
-
-  } catch(e){
-    console.error("classifier error",e);
-    return fallback(question);
+  }catch(e){
+    console.error("classifier error:",e);
+    return fallback();
   }
 }
