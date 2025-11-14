@@ -1,25 +1,24 @@
 // /api/utils/verify-recaptcha.js
+// reCAPTCHA v2 Checkbox verification
+
 export async function verifyRecaptcha(token) {
+  if (!token) return { ok:false, error:"Missing token" };
+
   try {
-    if (!token) return { ok: false, reason: "missing_token" };
-
-    const secret = process.env.RECAPTCHA_SECRET_KEY;
-    if (!secret) return { ok: false, reason: "missing_secret" };
-
-    const url = `https://www.google.com/recaptcha/api/siteverify`;
-    const params = new URLSearchParams();
-    params.append("secret", secret);
-    params.append("response", token);
-
-    const resp = await fetch(url, {
-      method: "POST",
-      body: params
+    const secret = process.env.RECAPTCHA_SECRET_KEY || "";
+    const res = await fetch("https://www.google.com/recaptcha/api/siteverify", {
+      method:"POST",
+      headers:{ "Content-Type":"application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        secret,
+        response: token
+      })
     });
 
-    const data = await resp.json();
-    return { ok: data.success === true, raw: data };
-  } catch (err) {
-    console.error("verifyRecaptcha error:", err);
-    return { ok: false, error: err.message };
+    const json = await res.json();
+    return json.success ? { ok:true } : { ok:false, details:json };
+
+  } catch (e) {
+    return { ok:false, error:"Network error", detail:e.message };
   }
 }
