@@ -4,7 +4,7 @@
   max-width: 640px;
   margin: 30px auto;
   background: #ffffff;
-  padding: 22px;
+  padding: 20px 22px;
   border-radius: 14px;
   border: 1px solid #ddd;
   box-shadow: 0 6px 24px rgba(0,0,0,0.12);
@@ -33,19 +33,17 @@
   width: 100%;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid #ccc;
+  border: 1px solid #bbb;
   font-size: 1rem;
   margin-bottom: 14px;
-  box-sizing: border-box;
 }
 
-/* Textarea */
 #question {
   min-height: 90px;
   resize: vertical;
 }
 
-/* Personal toggle checkbox */
+/* Personal toggle */
 .personal-toggle {
   display: flex;
   align-items: center;
@@ -53,12 +51,13 @@
   margin-bottom: 18px;
   cursor: pointer;
 }
+
 .personal-toggle input {
   width: 20px;
   height: 20px;
 }
 
-/* Slide-down personal fields */
+/* SLIDE-DOWN personal fields */
 #personal-fields {
   display: none;
   overflow: hidden;
@@ -80,7 +79,7 @@
   font-weight: 600;
 }
 
-/* Progress Bar */
+/* Progress + Spinner */
 .progress-wrapper {
   margin-top: 15px;
 }
@@ -98,7 +97,6 @@
   transition: width 0.3s linear;
 }
 
-/* Spinner */
 .spinner {
   display: none;
   text-align: center;
@@ -117,7 +115,7 @@
   border-radius: 10px;
 }
 
-/* Detailed Report CTA */
+/* Detailed Report */
 #detailed-btn {
   margin-top: 14px;
   width: 100%;
@@ -130,12 +128,54 @@
   cursor: pointer;
 }
 
-/* Mobile Tweaks */
-@media (max-width: 600px) {
-  .spiritual-container {
-    margin: 10px;
-    padding: 18px;
-  }
+/* MODAL */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top:0; left:0;
+  width:100%; height:100%;
+  background: rgba(0,0,0,0.55);
+  z-index: 9999;
+}
+
+.modal-box {
+  max-width: 380px;
+  margin: 120px auto;
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  text-align:center;
+  box-shadow:0 6px 24px rgba(0,0,0,0.2);
+}
+
+.modal-box input {
+  width: 100%;
+  padding:10px;
+  margin-top:12px;
+  border:1px solid #bbb;
+  border-radius:8px;
+}
+
+.modal-box button {
+  margin-top:14px;
+  background:#4caf50;
+  color:white;
+  padding:12px;
+  border:none;
+  width:100%;
+  border-radius:10px;
+  font-weight:600;
+  cursor:pointer;
+}
+
+.modal-close {
+  margin-top:10px;
+  background:#bbb;
+}
+
+/* Mobile */
+@media (max-width:600px){
+  .spiritual-container { margin:10px; padding:18px; }
 }
 </style>
 
@@ -144,216 +184,219 @@
 
   <form id="spiritual-form" class="spiritual-form" enctype="multipart/form-data">
 
-    <!-- PERSONAL QUESTION TOGGLE -->
     <label class="personal-toggle">
       <input type="checkbox" id="isPersonal" name="isPersonal" />
       <span>Is this a personal question? (enter personal information)</span>
     </label>
 
-    <!-- QUESTION FIELD -->
     <label>Your Question (max 25 words)</label>
     <textarea id="question" name="question" maxlength="200" placeholder="Example: Should I change jobs next year?"></textarea>
 
-    <!-- PERSONAL FIELDS -->
+    <!-- Personal fields -->
     <div id="personal-fields">
       <label>Email</label>
-      <input type="email" id="email" name="email"/>
+      <input type="email" id="email" name="email" />
 
       <label>Full Name</label>
-      <input type="text" id="name" name="name"/>
+      <input type="text" id="name" name="name" />
 
       <label>Date of Birth (DD-MM-YYYY)</label>
-      <input type="text" id="birthdate" name="birthdate" placeholder="13-03-1995"/>
+      <input type="text" id="birthdate" name="birthdate" placeholder="13-03-1995" />
 
-      <label>Time of Birth (HH:MM)</label>
-      <input type="text" id="birthtime" name="birthtime" placeholder="09:00"/>
+      <label>Time of Birth</label>
+      <input type="text" id="birthtime" name="birthtime" placeholder="09:00" />
 
-      <label>City of Birth</label>
-      <input type="text" id="birthcity" name="birthcity"/>
+      <label>City</label>
+      <input type="text" id="birthcity" name="birthcity" />
 
-      <label>State / Region</label>
-      <input type="text" id="birthstate" name="birthstate"/>
+      <label>State</label>
+      <input type="text" id="birthstate" name="birthstate" />
 
-      <label>Country of Birth</label>
-      <input type="text" id="birthcountry" name="birthcountry"/>
+      <label>Country</label>
+      <input type="text" id="birthcountry" name="birthcountry" />
 
-      <label>Upload Right Palm (optional)</label>
-      <input type="file" id="palmImage" name="palmImage" accept="image/*"/>
+      <label>Right Palm Image (optional)</label>
+      <input type="file" id="palmImage" name="palmImage" accept="image/*" />
     </div>
 
-    <!-- RECAPTCHA V2 CHECKBOX -->
-    <div id="recaptcha-wrapper" style="width:100%; text-align:center; margin:12px 0;">
-      <div id="recaptcha-box"></div>
-    </div>
+    <!-- reCAPTCHA visible checkbox -->
+    <div id="recaptcha-box" style="margin: 12px 0;"></div>
 
-    <!-- PRIMARY BUTTON -->
     <button type="submit" class="btn-primary">Get Answer</button>
 
-    <!-- PROGRESS + SPINNER -->
     <div class="progress-wrapper">
-      <div class="progress-bar"><div class="progress-bar-inner" id="progress-inner"></div></div>
-      <div class="spinner" id="spinner">Processing… please wait ⏳</div>
+      <div class="progress-bar"><div id="progress-inner" class="progress-bar-inner"></div></div>
+      <div id="spinner" class="spinner">Processing… please wait ⏳</div>
     </div>
-
   </form>
 
-  <!-- SUMMARY -->
   <div id="summary-container">
     <h3>Short Answer</h3>
-    <div class="summary-box" id="answer-summary">—</div>
+    <div id="answer-summary" class="summary-box">—</div>
+
     <button id="detailed-btn">Get Detailed Report (Free)</button>
   </div>
 </div>
 
-<!-- RECAPTCHA SCRIPT -->
+<!-- MODAL for technical email collection -->
+<div id="email-modal" class="modal-overlay">
+  <div class="modal-box">
+    <h3>Enter your email to receive the full PDF</h3>
+    <input type="email" id="modal-email" placeholder="you@example.com" />
+    <button id="modal-send">Send Report</button>
+    <button class="modal-close" id="modal-close">Cancel</button>
+  </div>
+</div>
+
+<!-- reCAPTCHA -->
 <script src="https://www.google.com/recaptcha/api.js?onload=onLoadRecaptcha&render=explicit" async defer></script>
 
 <script>
-/* ===============================
-   GLOBALS
-=============================== */
-const API_URL = "https://answers-rust.vercel.app/api/spiritual-report";
+const API_SHORT = "https://answers-rust.vercel.app/api/spiritual-report";
+const API_PDF   = "https://answers-rust.vercel.app/api/detailed-report";
+
 let recaptchaWidgetId = null;
 let recaptchaReady = false;
 
-/* ===============================
-   EXPLICIT RECAPTCHA RENDER
-=============================== */
-function safeRenderRecaptcha() {
+// =============== reCAPTCHA ===============
+function onLoadRecaptcha(){
   const box = document.getElementById("recaptcha-box");
-  if (!box) return;
-  if (recaptchaWidgetId !== null) return;
-  if (typeof grecaptcha === "undefined") return;
-
   recaptchaWidgetId = grecaptcha.render("recaptcha-box", {
     sitekey: "6LdAOgYsAAAAAFgNlxLkahtIAbZc4XcIJt2hfLsj",
-    theme: "light",
-    size: "normal",
-    callback: function(token) {
-      console.log("reCAPTCHA token:", token);
-    },
-    "expired-callback": function() {
-      console.log("reCAPTCHA expired → reset");
-      grecaptcha.reset(recaptchaWidgetId);
-    }
+    theme:"light",
+    size:"normal",
   });
-
   recaptchaReady = true;
 }
 
-function onLoadRecaptcha() {
-  setTimeout(safeRenderRecaptcha, 300);
-}
-
-document.addEventListener("DOMContentLoaded", safeRenderRecaptcha);
-document.addEventListener("shopify:section:load", safeRenderRecaptcha);
-
-/* ===============================
-   PERSONAL FIELDS SLIDE-DOWN
-=============================== */
+// =============== Slide-down ===============
 const personalCheckbox = document.getElementById("isPersonal");
 const personalFields = document.getElementById("personal-fields");
 
-personalCheckbox.addEventListener("change", () => {
-  if (personalCheckbox.checked) {
-    personalFields.style.display = "block";
-    personalFields.style.maxHeight = personalFields.scrollHeight + "px";
+personalCheckbox.addEventListener("change",()=>{
+  if(personalCheckbox.checked){
+    personalFields.style.display="block";
+    personalFields.style.maxHeight = personalFields.scrollHeight+"px";
   } else {
-    personalFields.style.maxHeight = "0px";
-    setTimeout(() => { personalFields.style.display = "none"; }, 300);
+    personalFields.style.maxHeight="0px";
+    setTimeout(()=>personalFields.style.display="none",300);
   }
 });
 
-/* ===============================
-   FORM SUBMISSION
-=============================== */
+// =============== Submit Short Answer ===============
 const form = document.getElementById("spiritual-form");
-const spinner = document.getElementById("spinner");
 const progressInner = document.getElementById("progress-inner");
-const summaryContainer = document.getElementById("summary-container");
-const answerSummary = document.getElementById("answer-summary");
-const detailedBtn = document.getElementById("detailed-btn");
+const spinner = document.getElementById("spinner");
+const summary = document.getElementById("summary-container");
+const answerBox = document.getElementById("answer-summary");
 
-function animateProgress() {
-  progressInner.style.width = "0%";
-  setTimeout(() => { progressInner.style.width = "30%"; }, 120);
-  setTimeout(() => { progressInner.style.width = "60%"; }, 620);
-  setTimeout(() => { progressInner.style.width = "85%"; }, 1220);
+let lastShortAnswer = "";
+let lastPayload = null;
+
+function animateProgress(){
+  progressInner.style.width="0%";
+  setTimeout(()=>progressInner.style.width="35%",100);
+  setTimeout(()=>progressInner.style.width="70%",600);
+  setTimeout(()=>progressInner.style.width="90%",1200);
 }
 
-function finishProgress() {
-  progressInner.style.width = "100%";
-  setTimeout(() => { progressInner.style.width = "0%"; }, 1600);
+function finishProgress(){
+  progressInner.style.width="100%";
+  setTimeout(()=>progressInner.style.width="0%",1500);
 }
 
-form.addEventListener("submit", async (e) => {
+form.addEventListener("submit", async e=>{
   e.preventDefault();
-
-  if (!recaptchaReady) {
-    alert("reCAPTCHA still loading… please wait 1–2 seconds.");
-    return;
-  }
+  if(!recaptchaReady) return alert("reCAPTCHA loading...");
 
   const token = grecaptcha.getResponse(recaptchaWidgetId);
-  if (!token) {
-    alert("Please complete the reCAPTCHA.");
-    return;
-  }
+  if(!token) return alert("Please complete the reCAPTCHA");
 
-  spinner.style.display = "block";
+  spinner.style.display="block";
   animateProgress();
 
-  const formData = new FormData(form);
-  formData.append("g-recaptcha-response", token);
+  const fd = new FormData(form);
+  fd.append("g-recaptcha-response", token);
 
-  let responseData = null;
-
-  try {
-    const response = await fetch(API_URL, {
-      method: "POST",
-      body: formData
-    });
-
-    const text = await response.text();
-    try {
-      responseData = JSON.parse(text);
-    } catch (err) {
-      console.error("❌ Invalid JSON:", text);
-      throw new Error("Server returned non-JSON (HTML error page)");
-    }
-
-  } catch (err) {
-    spinner.style.display = "none";
+  let json;
+  try{
+    const r = await fetch(API_SHORT,{ method:"POST", body:fd });
+    const tx = await r.text();
+    json = JSON.parse(tx);
+  }catch(err){
+    spinner.style.display="none";
     finishProgress();
-    alert("Server error: " + err.message);
-    return;
+    return alert("Server error: "+err.message);
   }
 
-  spinner.style.display = "none";
+  spinner.style.display="none";
   finishProgress();
 
-  // CENSORSHIP DETECTION
-  let shortAnswer = responseData.answer || "No answer received.";
-  const lowered = shortAnswer.toLowerCase();
-  if (
-    lowered.includes("not permitted") ||
-    lowered.includes("policy") ||
-    lowered.includes("assist with that request")
-  ) {
-    shortAnswer = "⚠️ Censored by OpenAI — this question cannot be answered.";
-  }
+  // Save payload for PDF
+  lastPayload = json;
 
-  answerSummary.textContent = shortAnswer;
-  summaryContainer.style.display = "block";
+  let ans = json.answer || "No answer.";
+  const low = ans.toLowerCase();
+  if(low.includes("policy") || low.includes("not permitted") || low.includes("cannot assist"))
+    ans = "⚠️ Censored by OpenAI — this question cannot be answered.";
 
-  // Reset for next question
+  lastShortAnswer = ans;
+
+  answerBox.textContent = ans;
+  summary.style.display="block";
+
   grecaptcha.reset(recaptchaWidgetId);
 });
 
-/* ===============================
-   DETAILED REPORT
-=============================== */
-detailedBtn.addEventListener("click", () => {
-  alert("Your detailed report has already been emailed!");
+// =============== Modal for Technical PDF ===============
+const modal = document.getElementById("email-modal");
+const modalEmail = document.getElementById("modal-email");
+const modalSend = document.getElementById("modal-send");
+const modalClose = document.getElementById("modal-close");
+
+// Open modal if technical question
+const detailedBtn = document.getElementById("detailed-btn");
+detailedBtn.addEventListener("click", ()=>{
+  if(!lastPayload) return alert("No answer yet.");
+
+  if(lastPayload.personal){
+    alert("Your detailed report has already been emailed!");
+  } else {
+    modal.style.display="block";
+  }
+});
+
+modalClose.addEventListener("click", ()=> modal.style.display="none");
+
+// Send PDF request
+modalSend.addEventListener("click", async ()=>{
+  const email = modalEmail.value.trim();
+  if(!email) return alert("Enter your email");
+
+  const fd = new FormData();
+  fd.append("email", email);
+  fd.append("question", form.querySelector("#question").value);
+  fd.append("answer", lastShortAnswer);
+  fd.append("personal", "false");
+
+  fd.append("astrologySummary", lastPayload.astrologySummary||"");
+  fd.append("numerologySummary", lastPayload.numerologySummary||"");
+  fd.append("palmistrySummary", lastPayload.palmistrySummary||"");
+  fd.append("numerologyPack", JSON.stringify(lastPayload.numerologyPack||{}));
+
+  try{
+    const r = await fetch(API_PDF,{ method:"POST", body:fd });
+    const tx = await r.text();
+    const js = JSON.parse(tx);
+
+    if(js.success){
+      modal.style.display="none";
+      alert("Your detailed report has been emailed!");
+    } else {
+      alert("Error: "+(js.error||"unknown"));
+    }
+  }catch(err){
+    alert("Server error: "+err.message);
+  }
 });
 </script>
