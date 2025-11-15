@@ -1,52 +1,44 @@
 // /api/utils/classify-question.js
 import OpenAI from "openai";
-let openai=null;
-if(process.env.OPENAI_API_KEY){
-  openai=new OpenAI({apiKey:process.env.OPENAI_API_KEY});
-}
+let client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey:process.env.OPENAI_API_KEY }) : null;
+
+const fallback = q => {
+  const t = (q||"").toLowerCase();
+  const personal = ["my","me","love","future","career","born","should i","for me"];
+  const isP = personal.some(k => t.includes(k));
+  return { type: isP?"personal":"technical", confidence:0.4, source:"fallback" };
+};
 
 export async function classifyQuestion(question){
-  const q=(question||"").toLowerCase();
+  if(!client) return fallback(question);
 
-  // fallback
-  const fallback=()=>{
-    const personalHints=["my","i ","should i","love","health","career","future","born","birth"];
-    return {
-      type: personalHints.some(h=>q.includes(h))?"personal":"technical",
-      confidence:0.55,
-      source:"fallback"
-    };
-  };
+  try {
+    const prompt = `
+Return JSON ONLY:
 
-  if(!openai) return fallback();
-
-  try{
-    const prompt=`
-Return JSON:
 {
- "type":"personal"|"technical",
- "confidence": number
+ "type": "personal" | "technical",
+ "confidence": 0..1
 }
 
-Classify this question:
-"${question}"
+User: "${question}"
 `;
 
-    const r=await openai.chat.completions.create({
+    const r = await client.chat.completions.create({
       model:"gpt-4o-mini",
-      temperature:0.0,
+      temperature:0,
       messages:[
-        {role:"system",content:"JSON only."},
+        {role:"system",content:"Return ONLY JSON. No text."},
         {role:"user",content:prompt}
       ]
     });
 
-    const text=r.choices[0].message.content.trim();
-    const parsed=JSON.parse(text);
-    return parsed;
-
-  }catch(e){
-    console.error("classifier error:",e);
-    return fallback();
+    const txt = r.choices?.[0]?.message?.content?.trim() || "{}";
+    const obj = JSON.parse(txt);
+    if(!obj.type) return fallback(question);
+    return { type:obj.type, confidence:Number(obj.confidence||0.5), source:"openai" };
+  } catch(e){
+    console.error("classifier error", e);
+    return fallback(question);
   }
 }
