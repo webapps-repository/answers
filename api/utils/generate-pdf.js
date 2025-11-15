@@ -1,74 +1,46 @@
 // /api/utils/generate-pdf.js
-import getStream from "get-stream";
+import PDFDocument from "pdfkit";
 
-let PDFDocument = null;
-try {
-  PDFDocument = (await import("pdfkit")).default;
-} catch (e) {
-  console.error("PDFKit load error:",e);
-  throw e;
-}
+export async function generatePdfBuffer(data){
+  return new Promise((resolve,reject)=>{
+    try{
+      const doc = new PDFDocument({ margin:40 });
+      const chunks = [];
 
-export async function generatePdfBuffer({
-  headerBrand,
-  titleText,
-  question,
-  answer,
-  astrologySummary="",
-  numerologySummary="",
-  palmistrySummary="",
-  numerologyPack={}
-}){
-  const doc = new PDFDocument({margin:50});
-  const chunks=[];
-  doc.on("data",d=>chunks.push(d));
-  doc.on("end",()=>{});
+      doc.on("data", c => chunks.push(c));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
 
-  doc.fontSize(20).text(headerBrand,{align:"center"});
-  doc.moveDown(0.4);
-  doc.fontSize(18).text(titleText,{align:"center"});
-  doc.moveDown(1);
+      doc.fontSize(20).text(data.headerBrand,{align:"center"});
+      doc.moveDown(1);
+      doc.fontSize(14).text("Your Detailed Report",{align:"center"});
+      doc.moveDown(2);
 
-  doc.fontSize(14).text("Question:",{underline:true});
-  doc.fontSize(12).text(question);
-  doc.moveDown(1);
+      doc.fontSize(12).text(`Question: ${data.question}`);
+      doc.moveDown();
+      doc.text(`Answer: ${data.answer}`);
+      doc.moveDown();
 
-  doc.fontSize(14).text("Answer:",{underline:true});
-  doc.fontSize(12).text(answer);
-  doc.moveDown(1);
+      if(data.astrologySummary){
+        doc.fontSize(14).text("Astrology", {underline:true});
+        doc.fontSize(12).text(data.astrologySummary);
+        doc.moveDown();
+      }
 
-  if(astrologySummary){
-    doc.fontSize(14).text("Astrology:",{underline:true});
-    doc.fontSize(12).text(astrologySummary);
-    doc.moveDown(1);
-  }
+      if(data.numerologySummary){
+        doc.fontSize(14).text("Numerology",{underline:true});
+        doc.fontSize(12).text(data.numerologySummary);
+        doc.moveDown();
+      }
 
-  if(numerologySummary){
-    doc.fontSize(14).text("Numerology:",{underline:true});
-    doc.fontSize(12).text(numerologySummary);
-    doc.moveDown(1);
-  }
+      if(data.palmistrySummary){
+        doc.fontSize(14).text("Palmistry",{underline:true});
+        doc.fontSize(12).text(data.palmistrySummary);
+        doc.moveDown();
+      }
 
-  if(palmistrySummary){
-    doc.fontSize(14).text("Palmistry:",{underline:true});
-    doc.fontSize(12).text(palmistrySummary);
-    doc.moveDown(1);
-  }
-
-  if(numerologyPack.technicalKeyPoints){
-    doc.fontSize(14).text("Key Points:",{underline:true});
-    numerologyPack.technicalKeyPoints.forEach(pt=>{
-      doc.fontSize(12).text("• "+pt);
-    });
-    doc.moveDown(1);
-  }
-
-  if(numerologyPack.technicalNotes){
-    doc.fontSize(14).text("Technical Notes:",{underline:true});
-    doc.fontSize(12).text(numerologyPack.technicalNotes);
-    doc.moveDown(1);
-  }
-
-  doc.end();
-  return await getStream.buffer(doc);
+      doc.end();
+    }catch(e){
+      reject(e);
+    }
+  });
 }
