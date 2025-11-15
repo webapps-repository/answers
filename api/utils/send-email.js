@@ -1,33 +1,29 @@
 // /api/utils/send-email.js
 import { Resend } from "resend";
+const FROM = "Melodies Web <sales@hazcam.io>";
 
 export async function sendEmailHTML({to,subject,html,attachments=[]}){
-  if(!process.env.RESEND_API_KEY){
-    console.error("Missing RESEND_API_KEY");
-    return {success:false,error:"Missing key"};
+  const key = process.env.RESEND_API_KEY;
+  if(!key){
+    console.error("❌ RESEND_API_KEY missing");
+    return {success:false,error:"missing key"};
   }
 
-  const resend=new Resend(process.env.RESEND_API_KEY);
+  const resend = new Resend(key);
 
   try{
-    const resp=await resend.emails.send({
-      from:"Melodies Web <sales@hazcam.io>",
+    const resp = await resend.emails.send({
+      from: FROM,
       to,
       subject,
       html,
-      attachments:attachments.map(a=>({
-        filename:a.filename,
-        content:a.buffer
-      }))
+      attachments: attachments.length? attachments:undefined
     });
+    if(resp?.data?.id) return {success:true,id:resp.data.id};
 
-    if(resp?.data?.id){
-      return {success:true,id:resp.data.id};
-    }
-    return {success:false,error:"Unexpected Resend response"};
-  }
-  catch(e){
-    console.error("Email error:",e);
+    return {success:false,error:"unexpected",raw:resp};
+  }catch(e){
+    console.error("sendEmail error",e);
     return {success:false,error:String(e)};
   }
 }
