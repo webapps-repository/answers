@@ -1,17 +1,26 @@
 // /api/spiritual-report.js
-// SHORT ANSWER HANDLER — personal + technical
-// CORS + FormData + reCAPTCHA v2 + classifier-hint + numerology
+// Core: CORS + reCAPTCHA + user-selected personal mode + numerology + PDF + email
+// Fully audited, JSON-safe, works with Vercel Node 22.x, Resend, and your Liquid frontend.
 
 import { formidable } from "formidable";
-import { verifyRecaptcha } from "./utils/verify-recaptcha.js";
 import { classifyQuestion } from "./utils/classify-question.js";
+import { verifyRecaptcha } from "./utils/verify-recaptcha.js";
 import { personalSummaries, technicalSummary } from "./utils/generate-insights.js";
+import { generatePdfBuffer } from "./utils/generate-pdf.js";
+import { sendEmailHTML } from "./utils/send-email.js";
 
+// Vercel / serverless required setting
 export const config = { api: { bodyParser: false } };
 
-// helpers
+// ---------------- HELPERS ----------------
 const safe = (v, d = "") =>
   v == null ? d : Array.isArray(v) ? String(v[0] ?? d) : String(v);
+
+const isPersonalTrue = (v) => {
+  if (!v) return false;
+  const x = String(v).toLowerCase().trim();
+  return x === "yes" || x === "true" || x === "on" || x === "personal";
+};
 
 const toISO = (ddmmyyyy) => {
   const s = safe(ddmmyyyy);
@@ -19,20 +28,37 @@ const toISO = (ddmmyyyy) => {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : s;
 };
 
-// numerology helpers
-const MAP = { A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,I:9,J:1,K:2,L:3,M:4,N:5,O:6,P:7,Q:8,R:9,S:1,T:2,U:3,V:4,W:5,X:6,Y:7,Z:8 };
-const reduce = n => { while (n>9 && ![11,22,33].includes(n)) n = String(n).split("").reduce((a,b)=>a+(+b||0),0); return n; };
-const letters = s => (s||"").toUpperCase().replace(/[^A-Z]/g,"");
-const vowels  = s => (s||"").toUpperCase().replace(/[^AEIOUY]/g,"");
-const cons    = s => (s||"").toUpperCase().replace(/[^A-Z]|[AEIOUY]/g,"");
-const sumL = s => reduce(letters(s).split("").reduce((t,c)=>t+(MAP[c]||0),0));
-const sumV = s => reduce(vowels(s).split("").reduce((t,c)=>t+(MAP[c]||0),0));
-const sumC = s => reduce(cons(s).split("").reduce((t,c)=>t+(MAP[c]||0),0));
-const life = iso =>
-  reduce((iso||"").replace(/\D/g,"").split("").reduce((t,d)=>t+(+d||0),0));
+// ---------------- NUMEROLOGY (local) ----------------
+const MAP = {
+  A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,I:9,
+  J:1,K:2,L:3,M:4,N:5,O:6,P:7,Q:8,R:9,
+  S:1,T:2,U:3,V:4,W:5,X:6,Y:7,Z:8
+};
 
+const reduceNum = (n) => {
+  const keep = (x) => x === 11 || x === 22 || x === 33;
+  while (n > 9 && !keep(n)) {
+    n = String(n).split("").reduce((a,b)=>a+(+b||0),0);
+  }
+  return n;
+};
+
+const lettersOnly = (s) => (s||"").toUpperCase().replace(/[^A-Z]/g,"");
+const vowelsOnly  = (s) => (s||"").toUpperCase().replace(/[^AEIOUY]/g,"");
+const consOnly    = (s) => (s||"").toUpperCase().replace(/[^A-Z]|[AEIOUY]/g,"");
+
+const sumLetters = (s) => reduceNum(lettersOnly(s).split("").reduce((t,c)=>t+(MAP[c]||0),0));
+const sumVowels  = (s) => reduceNum(vowelsOnly(s).split("").reduce((t,c)=>t+(MAP[c]||0),0));
+const sumCons    = (s) => reduceNum(consOnly(s).split("").reduce((t,c)=>t+(MAP[c]||0),0));
+
+const lifePathFromISO = (iso) =>
+  reduceNum((iso||"").replace(/\D/g,"").split("").reduce((t,d)=>t+(+d||0),0));
+
+// =======================================================
+//                         HANDLER
+// =======================================================
 export default async function handler(req, res) {
-  // CORS
+  // ------------- CORS -------------
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -40,103 +66,175 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  // Formidable
+  // ------------- FORM PARSE -------------
   const form = formidable({
     multiples: false,
     keepExtensions: true,
     allowEmptyFiles: true,
     minFileSize: 0,
-    maxFileSize: 8 * 1024 * 1024
+    maxFileSize: 10 * 1024 * 1024,
   });
 
   try {
-    form.parse(req, async (err, fields) => {
-
+    form.parse(req, async (err, fields, files) => {
       if (err) {
-        console.error("❌ parse error", err);
-        return res.status(400).json({ error: "Parse error", detail: err.message });
+        console.error("❌ Formidable parse error:", err);
+        return res.status(400).json({ success: false, error: "form-parse-error" });
       }
 
+      // Palm image optional
+      const palmImage = files.palmImage;
+      const palmImagePath = palmImage && palmImage.size > 0 ? palmImage.filepath : null;
+
+      // ------------- RECAPTCHA -------------
       const token = safe(fields["g-recaptcha-response"]);
       const rc = await verifyRecaptcha(token);
 
       if (!rc.ok) {
-        return res.status(403).json({ error: "reCAPTCHA failed", details: rc });
+        return res.status(403).json({
+          success: false,
+          error: "recaptcha-failed",
+          details: rc
+        });
       }
 
+      // ------------- INPUTS -------------
       const question = safe(fields.question).trim();
-      const isPersonal = ["yes","on","true","personal"].includes(
-        safe(fields.isPersonal).toLowerCase()
-      );
-
-      const email = safe(fields.email).trim();
+      const email = safe(fields.email).trim();   // May be empty (technical questions)
       const fullName = safe(fields.name).trim();
-      const birthISO = toISO(safe(fields.birthdate));
-      const birthTime = safe(fields.birthtime,"Unknown");
+
+      const birthDDMM = safe(fields.birthdate);
+      const birthISO  = toISO(birthDDMM);
+      const birthTime = safe(fields.birthtime, "Unknown");
+
       const birthPlace = [
         safe(fields.birthcity),
         safe(fields.birthstate),
         safe(fields.birthcountry)
       ].filter(Boolean).join(", ");
 
-      // classifier hint only
-      let cls = { type:"unknown", confidence:0, source:"fallback" };
-      try { cls = await classifyQuestion(question); } catch {}
+      // ------------- USER SELECTED PERSONAL MODE -------------
+      const isPersonal = isPersonalTrue(fields.isPersonal);
 
-      const decorated = `${question}
+      // ------------- CLASSIFIER (used only as hint) -------------
+      let classification = { type: "unknown", confidence: 0.0, source: "fallback" };
+      try {
+        classification = await classifyQuestion(question);
+      } catch (e) {
+        console.warn("⚠ classifyQuestion failed:", e);
+      }
 
-[Classifier: type=${cls.type}, conf=${cls.confidence}, userMarked=${isPersonal}]`;
+      const decoratedQuestion = `${question}
 
-      // numerology
+[ClassifierHint type=${classification.type} conf=${classification.confidence} userMarkedPersonal=${isPersonal}]`;
+
+      // ------------- NUMEROLOGY (if personal) -------------
       let numerologyPack = {};
+
       if (isPersonal) {
-        const lp = life(birthISO);
-        const expr = sumL(fullName);
-        const pers = sumC(fullName);
-        const soul = sumV(fullName);
-        const mat  = reduce(lp + expr);
-        numerologyPack = { lifePath:lp, expression:expr, personality:pers, soulUrge:soul, maturity:mat };
+        const lp = lifePathFromISO(birthISO);
+        const expr = sumLetters(fullName);
+        const pers = sumCons(fullName);
+        const soul = sumVowels(fullName);
+        const mat  = reduceNum(lp + expr);
+
+        numerologyPack = {
+          lifePath: lp,
+          expression: expr,
+          personality: pers,
+          soulUrge: soul,
+          maturity: mat,
+        };
       }
 
-      // insights
-      let answer="", astro="", num="", palm="";
+      // ------------- GENERATE INSIGHTS -------------
+      let answer = "";
+      let astrologySummary = "";
+      let numerologySummary = "";
+      let palmistrySummary = "";
 
       if (isPersonal) {
-        const out = await personalSummaries({
-          fullName, birthISO, birthTime, birthPlace,
-          question: decorated, numerologyPack
+        const s = await personalSummaries({
+          fullName,
+          birthISO,
+          birthTime,
+          birthPlace,
+          question: decoratedQuestion,
+          numerologyPack
         });
-        answer = out.answer;
-        astro  = out.astrologySummary;
-        num    = out.numerologySummary;
-        palm   = out.palmistrySummary;
+
+        answer = s.answer || "Your personal answer is ready.";
+        astrologySummary  = s.astrologySummary || "";
+        numerologySummary = s.numerologySummary || "";
+        palmistrySummary  = s.palmistrySummary || "";
       } else {
-        const out = await technicalSummary(decorated);
-        answer = out.answer;
+        const t = await technicalSummary(decoratedQuestion);
+        answer = t.answer || "Your concise answer is ready.";
+        numerologyPack = {
+          keyPoints: Array.isArray(t.keyPoints) ? t.keyPoints : [],
+          technicalNotes: t.notes || "",
+        };
       }
 
-      // censor detection
-      let censored = false;
-      const lc = (answer||"").toLowerCase();
-      if (lc.includes("policy") || lc.includes("not permitted") || lc.includes("cannot assist")) {
-        answer = "⚠️ Censored by OpenAI — this question cannot be answered.";
-        censored = true;
+      // ------------- SHORT ANSWER RETURNED TO FRONTEND -------------
+      const censored = answer.toLowerCase().includes("not permitted")
+                    || answer.toLowerCase().includes("policy")
+                    || answer.toLowerCase().includes("assist with that request");
+
+      const finalShortAnswer = censored
+        ? "⚠️ Censored by OpenAI — this question cannot be answered."
+        : answer;
+
+      // ------------- PDF (ONLY auto for personal) -------------
+      let pdf = null;
+
+      if (isPersonal && email) {
+        pdf = await generatePdfBuffer({
+          headerBrand: "Melodies Web",
+          titleText: "Your Answer",
+          mode: "personal",
+          question,
+          answer,
+          fullName,
+          birthdate: birthDDMM,
+          birthTime,
+          birthPlace,
+          astrologySummary,
+          numerologySummary,
+          palmistrySummary,
+          numerologyPack
+        });
+
+        await sendEmailHTML({
+          to: email,
+          subject: `Your Answer: ${question}`,
+          html: `
+            <h2>Melodies Web</h2>
+            <p>Your detailed personal report is attached.</p>
+          `,
+          attachments: [
+            { filename: "Your_Answer.pdf", buffer: pdf }
+          ]
+        });
       }
 
+      // ------------- FINAL RESPONSE TO WEB PAGE -------------
       return res.status(200).json({
         success: true,
-        personal: isPersonal,
-        answer,
-        astrologySummary: astro,
-        numerologySummary: num,
-        palmistrySummary: palm,
-        numerologyPack,
-        censored
+        isPersonal,
+        answer: finalShortAnswer,
+        astrologySummary,
+        numerologySummary,
+        palmistrySummary,
       });
-
     });
+
   } catch (e) {
-    console.error("❌ spiritual-report error", e);
-    return res.status(500).json({ error: "server error", detail: String(e) });
+    console.error("❌ UNHANDLED ERROR:", e);
+    return res.status(500).json({
+      success: false,
+      error: "server-error",
+      detail: String(e?.message || e),
+    });
   }
 }
