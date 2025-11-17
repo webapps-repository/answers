@@ -2,8 +2,6 @@
 // Enhanced PDF builder for unified detailed spiritual reports + technical reports
 
 import PDFDocument from "pdfkit";
-import { promisify } from "util";
-import fs from "fs";
 
 export function generatePDF({
   mode = "personal",
@@ -19,14 +17,8 @@ export function generatePDF({
 }) {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({
-        size: "A4",
-        margin: 40
-      });
+      const doc = new PDFDocument({ size: "A4", margin: 40 });
 
-      // ------------------------------
-      // Buffer PDF into memory
-      // ------------------------------
       const chunks = [];
       doc.on("data", (d) => chunks.push(d));
       doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -36,19 +28,15 @@ export function generatePDF({
       // ------------------------------
       doc
         .fontSize(20)
-        .text("Melodies Web — Detailed Report", {
-          align: "center"
-        })
+        .text("Melodies Web — Detailed Report", { align: "center" })
         .moveDown(2);
 
       // ------------------------------
-      // Intro
+      // QUESTION
       // ------------------------------
       doc
         .fontSize(12)
-        .text(`Your Question: "${question}"`, {
-          align: "left"
-        })
+        .text(`Your Question: "${question}"`, { align: "left" })
         .moveDown();
 
       if (mode === "personal") {
@@ -59,72 +47,102 @@ export function generatePDF({
         doc.moveDown();
       }
 
-      doc
-        .fontSize(14)
-        .fillColor("#333")
-        .text("Summary Answer", { underline: true })
-        .moveDown(0.5);
+      // ------------------------------
+      // SUMMARY
+      // ------------------------------
+      createSectionHeader(doc, "Summary Answer");
+      doc.fontSize(11).fillColor("black").text(insights.shortAnswer, { align: "left" }).moveDown(1.5);
 
-      doc
-        .fontSize(11)
-        .fillColor("black")
-        .text(insights.shortAnswer, { align: "left" })
-        .moveDown(1.5);
-
-      // ===========================================
-      // PERSONAL REPORT SECTIONS
-      // ===========================================
+      // ======================================================
+      // PERSONAL MODE
+      // ======================================================
       if (mode === "personal") {
-        // ------------------------------
-        // ASTROLOGY INTERPRETATION
-        // ------------------------------
+        // Astrology
         createSectionHeader(doc, "Astrological Interpretation");
         doc.text(insights.interpretations.astrology, { align: "left" }).moveDown();
-
         createAstrologyTables(doc, astrology);
 
-        // ------------------------------
-        // NUMEROLOGY
-        // ------------------------------
+        // Numerology
         createSectionHeader(doc, "Numerological Interpretation");
         doc.text(insights.interpretations.numerology, { align: "left" }).moveDown();
-
         createNumerologyTable(doc, numerology);
 
-        // ------------------------------
-        // PALMISTRY
-        // ------------------------------
+        // Palmistry
         createSectionHeader(doc, "Palmistry Interpretation");
         doc.text(insights.interpretations.palmistry, { align: "left" }).moveDown();
-
         createPalmistryTable(doc, palmistry);
 
-        // ------------------------------
-        // COMBINED SYNTHESIS
-        // ------------------------------
+        // Combined
         createSectionHeader(doc, "Combined Synthesis (Astrology + Numerology + Palmistry)");
         doc.text(insights.interpretations.combined, { align: "left" }).moveDown();
 
-        // ------------------------------
-        // TIMELINE / FORECAST
-        // ------------------------------
+        // Timeline
         createSectionHeader(doc, "Timeline & Forecast");
         doc.text(insights.interpretations.timeline, { align: "left" }).moveDown();
 
-        // ------------------------------
-        // RECOMMENDATIONS
-        // ------------------------------
+        // Recommendations
         createSectionHeader(doc, "Guidance & Recommendations");
         doc.text(insights.interpretations.recommendations, { align: "left" }).moveDown();
       }
 
-      // ===========================================
-      // TECHNICAL REPORT SECTIONS
-      // ===========================================
+      // ======================================================
+      // TECHNICAL MODE
+      // ======================================================
       if (mode === "technical") {
         createSectionHeader(doc, "Key Points");
-        doc.text(insights.keyPoints.join("\n• "), { align: "left" }).moveDown();
+        doc.text("• " + insights.keyPoints.join("\n• "), { align: "left" }).moveDown();
 
         createSectionHeader(doc, "Detailed Explanation");
         doc.text(insights.explanation, { align: "left" }).moveDown();
+
+        createSectionHeader(doc, "Recommendations");
+        doc.text(insights.recommendations, { align: "left" }).moveDown();
       }
+
+      // END PDF
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+/* ======================================================
+   HELPERS
+====================================================== */
+
+function createSectionHeader(doc, title) {
+  doc
+    .moveDown()
+    .fontSize(14)
+    .fillColor("#333")
+    .text(title, { underline: true })
+    .moveDown(0.5);
+}
+
+function createAstrologyTables(doc, astrology) {
+  if (!astrology) return;
+  doc.fontSize(11).text("Astrological Data:", { align: "left" });
+  for (const [k, v] of Object.entries(astrology)) {
+    doc.text(`${k}: ${v}`);
+  }
+  doc.moveDown();
+}
+
+function createNumerologyTable(doc, numerology) {
+  if (!numerology) return;
+  doc.fontSize(11).text("Numerology Data:", { align: "left" });
+  for (const [k, v] of Object.entries(numerology)) {
+    doc.text(`${k}: ${v}`);
+  }
+  doc.moveDown();
+}
+
+function createPalmistryTable(doc, palmistry) {
+  if (!palmistry) return;
+  doc.fontSize(11).text("Palmistry Data:", { align: "left" });
+  for (const [k, v] of Object.entries(palmistry)) {
+    doc.text(`${k}: ${v}`);
+  }
+  doc.moveDown();
+}
