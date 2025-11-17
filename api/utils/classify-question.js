@@ -1,61 +1,69 @@
 // /api/utils/classify-question.js
+// Enhanced classifier with fallback
+
 import OpenAI from "openai";
 
 let client = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-// Fallback classifier
-function fallback(q = "") {
+// fallback keywords
+const fallback = (q = "") => {
   const t = q.toLowerCase();
 
-  const intents = {
-    love: ["love", "relationship", "partner", "marriage"],
-    career: ["career", "job", "work", "promotion"],
-    money: ["money", "finance", "income", "wealth"],
-    health: ["health", "body", "ill", "heal"],
-    spiritual: ["spiritual", "soul", "meaning"],
+  const map = {
+    love: ["love", "relationship", "marriage", "partner"],
+    career: ["career", "job", "promotion", "work"],
+    money: ["money", "finance", "income"],
+    health: ["health", "ill", "body"],
+    spiritual: ["soul", "meaning", "purpose", "spiritual"]
   };
 
-  let detected = "general";
+  let intent = "general";
 
-  for (const k of Object.keys(intents)) {
-    if (intents[k].some((x) => t.includes(x))) detected = k;
+  for (const key of Object.keys(map)) {
+    if (map[key].some(w => t.includes(w))) intent = key;
   }
 
+  const type = ["technical", "code", "bug", "math"].some(w => t.includes(w))
+    ? "technical"
+    : "personal";
+
   return {
-    type: detected === "general" ? "technical" : "personal",
-    intent: detected,
+    type,
+    intent,
     confidence: 0.3,
-    tone: "neutral",
+    source: "fallback"
   };
-}
+};
 
 export async function classifyQuestion(question) {
   if (!client) return fallback(question);
 
   try {
     const prompt = `
-Classify this question: "${question}"
+Classify the user's question:
 
-Return ONLY JSON:
+"${question}"
+
+Return ONLY this JSON:
 {
-  "type": "personal" | "technical",
-  "intent": "love" | "career" | "money" | "health" | "spiritual" | "general",
-  "confidence": number,
-  "tone": "emotional" | "neutral" | "urgent" | "curious"
+"type": "personal" | "technical",
+"intent": "love" | "career" | "money" | "health" | "spiritual" | "general" | "technical",
+"confidence": number,
+"tone": "emotional" | "neutral" | "curious" | "urgent"
 }`;
 
     const r = await client.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0,
-      messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
+      messages: [{ role: "user", content: prompt }]
     });
 
     return r.choices[0].message.parsed;
   } catch (err) {
-    console.error("Classification error:", err);
+    console.error("CLASSIFY ERROR:", err);
     return fallback(question);
   }
 }
