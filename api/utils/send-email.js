@@ -3,11 +3,11 @@ import { Resend } from "resend";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-export async function sendEmailHTML({ to, subject, html, attachments = [] }) {
+export async function sendEmail({ to, subject, html, attachments = [] }) {
   try {
     const formattedAttachments = attachments.map(att => ({
       filename: att.filename,
-      content: att.content.toString("base64"),   // MUST be Base64 string
+      content: att.content.toString("base64"),
       encoding: "base64"
     }));
 
