@@ -47,9 +47,64 @@ export function synthesizeTriad({
 // ==========================================================
 // SHORT ANSWER
 // ==========================================================
-function generateShortAnswer({ question, intent, astrology, numerology }) {
-  return `The energies around your question — "${question}" — show strong movement in the area of ${intent}. Both your chart and numerology indicate clarity emerging over the coming cycle.`;
+function generateShortAnswer({ question, intent, astrology, numerology, palmistry }) {
+  
+  // -----------------------------
+  // Intent-based core message
+  // -----------------------------
+  const intentMessages = {
+    love: "your emotional patterns and relationship cycles are highlighted",
+    career: "your vocational rhythm and growth cycles are activating strongly",
+    money: "your financial pathway shows upcoming shifts in stability and opportunity",
+    health: "your wellbeing cycles point to renewal and stabilisation",
+    spiritual: "your intuitive and inner-growth pathways are opening clearly",
+    personal_growth: "your self-development cycle is entering a transformative phase",
+    life_direction: "your directional energy is clarifying and aligning",
+    general: "your overall energetic pattern is becoming clearer",
+  };
+
+  const base = intentMessages[intent] || intentMessages.general;
+
+  // -----------------------------
+  // Astrology signals
+  // -----------------------------
+  const astroKey =
+    astrology && (astrology.sun || astrology.moon || astrology.rising)
+      ? `Your core placements — Sun: ${astrology.sun || "?"}, Moon: ${astrology.moon ||
+          "?"}, Rising: ${astrology.rising || "?"} — show a pattern that connects directly to this question.`
+      : "";
+
+  // -----------------------------
+  // Numerology signals
+  // -----------------------------
+  const numKey =
+    numerology && numerology.lifePath
+      ? `Your Life Path ${numerology.lifePath} and current Personal Year ${numerology.personalYear} indicate timing influences around this situation.`
+      : "";
+
+  // -----------------------------
+  // Palmistry signals
+  // -----------------------------
+  const palmKey =
+    palmistry && palmistry.features
+      ? `Your palm lines reflect inner tendencies influencing this matter — especially the ${palmistry.features.heartLine !== "Unknown"
+          ? "heart line showing emotional depth"
+          : "head line showing internal clarity"
+        }.`
+      : "";
+
+  // -----------------------------
+  // FINAL ANSWER (short, direct)
+  // -----------------------------
+  return (
+    `In response to your question — "${question}" — ${base}. ` +
+    `${astroKey ? astroKey + " " : ""}` +
+    `${numKey ? numKey + " " : ""}` +
+    `${palmKey ? palmKey + " " : ""}` +
+    `Overall, the combined indicators suggest meaningful movement and clearer progress forming around this matter.`
+  ).trim();
 }
+
 
 // ==========================================================
 // ASTROLOGY SECTION
