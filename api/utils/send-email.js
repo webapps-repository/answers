@@ -11,24 +11,20 @@ export async function sendEmailHTML({ to, subject, html, attachments = [] }) {
       encoding: "base64"
     }));
 
-    const result = await resend.emails.send({
+    const r = await resend.emails.send({
       from: "Melodies Web <noreply@hazcam.io>",
       to,
       subject,
       html,
-      attachments: formattedAttachments.length ? formattedAttachments : undefined,
+      attachments: formattedAttachments
     });
 
-    console.log("📨 Email Send OK:", result.id);
-
-    return { success: true, id: result.id };
-
+    return { success: true, id: r.id };
   } catch (err) {
-    console.error("❌ Email send failed:", err);
-
+    console.error("EMAIL SEND FAILED:", err);
     return {
       success: false,
-      error: err.message || "Unexpected error",
+      error: err.message ?? "unknown"
     };
   }
 }
