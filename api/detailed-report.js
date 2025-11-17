@@ -1,83 +1,61 @@
-// /api/detailed-report.js
-import { generateInsights } from "./utils/generate-insights.js";
-import { generatePDF } from "./utils/generate-pdf.js";
-import { sendEmail } from "./utils/send-email.js";
+// /api/utils/classify-question.js
+import OpenAI from "openai";
 
-function allowCors(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+let client = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
+
+// Fallback classifier
+function fallback(q = "") {
+  const t = q.toLowerCase();
+
+  const intents = {
+    love: ["love", "relationship", "partner", "marriage"],
+    career: ["career", "job", "work", "promotion"],
+    money: ["money", "finance", "income", "wealth"],
+    health: ["health", "body", "ill", "heal"],
+    spiritual: ["spiritual", "soul", "meaning"],
+  };
+
+  let detected = "general";
+
+  for (const k of Object.keys(intents)) {
+    if (intents[k].some((x) => t.includes(x))) detected = k;
+  }
+
+  return {
+    type: detected === "general" ? "technical" : "personal",
+    intent: detected,
+    confidence: 0.3,
+    tone: "neutral",
+  };
 }
 
-export const config = {
-  api: { bodyParser: true }
-};
-
-export default async function handler(req, res) {
-  allowCors(res);
-
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST")
-    return res.status(405).json({ ok: false, error: "Method not allowed." });
+export async function classifyQuestion(question) {
+  if (!client) return fallback(question);
 
   try {
-    const { question, email } = req.body;
+    const prompt = `
+Classify this question: "${question}"
 
-    if (!question)
-      return res.status(400).json({ ok: false, error: "Question is required." });
+Return ONLY JSON:
+{
+  "type": "personal" | "technical",
+  "intent": "love" | "career" | "money" | "health" | "spiritual" | "general",
+  "confidence": number,
+  "tone": "emotional" | "neutral" | "urgent" | "curious"
+}`;
 
-    if (!email)
-      return res.status(400).json({ ok: false, error: "Email is required." });
-
-    const insights = await generateInsights({
-      question,
-      technicalMode: true,
-      isPersonal: false
+    const r = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
     });
 
-    if (!insights.ok) {
-      return res.status(500).json({
-        ok: false, error: "Insight generation failed", detail: insights.error
-      });
-    }
-
-    const pdfBuffer = await generatePDF({
-      mode: "technical",
-      question,
-      insights
-    });
-
-    const emailResult = await sendEmail({
-      to: email,
-      subject: "Your Detailed Technical Report",
-      html: `<p>Your detailed technical analysis is attached.</p>`,
-      attachments: [
-        { filename: "technical-report.pdf", content: pdfBuffer }
-      ]
-    });
-
-    // FIX: check .success instead of .ok
-    if (!emailResult.success) {
-      return res.status(500).json({
-        ok: false,
-        error: "Email failed",
-        detail: emailResult.error
-      });
-    }
-
-    return res.status(200).json({
-      ok: true,
-      pdfEmailed: true,
-      shortAnswer: insights.shortAnswer,
-      stampedAt: new Date().toISOString()
-    });
-
+    return r.choices[0].message.parsed;
   } catch (err) {
-    console.error("Detailed report error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Server error",
-      detail: err.message
-    });
+    console.error("Classification error:", err);
+    return fallback(question);
   }
 }
