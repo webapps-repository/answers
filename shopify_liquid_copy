@@ -77,6 +77,32 @@
       border-radius: 10px;
     }
 
+    .spinner {
+      display:none;
+      text-align:center;
+      margin-top:8px;
+      color:#444;
+      font-size:0.95rem;
+    }
+
+    /* PROGRESS BAR */
+    .progress-wrapper {
+      width: 100%;
+      height: 10px;
+      background: #eee;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 15px;
+      display: none;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #6c63ff, #8a6bff);
+      transition: width 0.3s ease;
+    }
+
     /* EMAIL MODAL */
     #email-modal-backdrop {
       position: fixed; left: 0; top: 0;
@@ -110,8 +136,6 @@
 
     .modal-send { background:#4caf50;color:white; }
     .modal-cancel { background:#ddd;color:black; }
-
-    .spinner { display:none;text-align:center;margin-top:8px;color:#444;font-size:0.95rem; }
   </style>
 
 </head>
@@ -147,7 +171,12 @@
     <div id="recaptcha-box" class="field"></div>
 
     <button class="btn" type="submit">Get Answer</button>
+
     <div class="spinner" id="spinner">Processing…</div>
+
+    <div class="progress-wrapper">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
 
   </form>
 
@@ -171,6 +200,7 @@
 </div>
 
 <script src="https://www.google.com/recaptcha/api.js?onload=onLoadRecaptcha&render=explicit" async defer></script>
+
 <script>
 /* ========================= CONFIG ========================= */
 const API_SUMMARY = "https://answers-rust.vercel.app/api/spiritual-report";
@@ -186,14 +216,13 @@ function onLoadRecaptcha() {
   });
 }
 
-/* ========================= DOM REFERENCES ========================= */
+/* DOM REFERENCES */
 const personalCheckbox = document.getElementById("isPersonal");
 const personalFields   = document.getElementById("personal-fields");
 
 const summaryContainer = document.getElementById("summary-container");
 const answerSummary    = document.getElementById("answer-summary");
 const detailedBtn      = document.getElementById("detailed-btn");
-
 const spinner          = document.getElementById("spinner");
 
 const modalBackdrop    = document.getElementById("email-modal-backdrop");
@@ -202,7 +231,7 @@ const modalSend        = document.getElementById("modal-send");
 const modalCancel      = document.getElementById("modal-cancel");
 
 /* ============================================================
-   PERSONAL TOGGLE — show/hide fields
+   PERSONAL TOGGLE
 ============================================================ */
 personalCheckbox.addEventListener("change", () => {
   personalFields.style.display = personalCheckbox.checked ? "block" : "none";
@@ -215,7 +244,7 @@ document.getElementById("spiritual-form").addEventListener("submit", async (e) =
   e.preventDefault();
 
   const token = grecaptcha.getResponse(recaptchaWidgetId);
-  if (!token) return alert("Please complete the reCAPTCHA.");
+  if (!token) return alert("Please complete reCAPTCHA.");
 
   spinner.style.display = "block";
 
@@ -242,18 +271,11 @@ document.getElementById("spiritual-form").addEventListener("submit", async (e) =
 
   spinner.style.display = "none";
 
-  /* Short answer */
   answerSummary.textContent = result.shortAnswer || "No answer.";
-
-  /* Show container */
   summaryContainer.style.display = "block";
 
-  /* If personal → PDF already emailed */
-  if (result.pdfEmailed === true) {
-    detailedBtn.style.display = "none";
-  } else {
-    detailedBtn.style.display = "block";
-  }
+  // hide/show the full PDF button
+  detailedBtn.style.display = "block";
 
   grecaptcha.reset(recaptchaWidgetId);
 });
@@ -266,18 +288,24 @@ detailedBtn.addEventListener("click", () => {
   const existingEmail = document.getElementById("email").value.trim();
 
   if (personalMode) {
-    return alert("Your full personal report has already been emailed to the email you provided.");
+    // PERSONAL → require email
+    if (!existingEmail) {
+      modalBackdrop.style.display = "flex";
+      return;
+    }
+    return requestPdf(existingEmail);
   }
 
+  // TECHNICAL
   if (!existingEmail) {
-    modalBackdrop.style.display = "flex"; // ask for email
+    modalBackdrop.style.display = "flex";
   } else {
     requestPdf(existingEmail);
   }
 });
 
 /* ============================================================
-   POPUP: SEND PDF
+  POPUP SEND
 ============================================================ */
 modalCancel.addEventListener("click", () => {
   modalBackdrop.style.display = "none";
@@ -285,13 +313,13 @@ modalCancel.addEventListener("click", () => {
 
 modalSend.addEventListener("click", () => {
   const email = modalEmail.value.trim();
-  if (!email) return alert("Please enter an email.");
+  if (!email) return alert("Enter an email.");
   modalBackdrop.style.display = "none";
   requestPdf(email);
 });
 
 /* ============================================================
-   FUNCTION: SEND TECHNICAL PDF REQUEST
+   FUNCTION: SEND TECHNICAL/PERSONAL PDF REQUEST
 ============================================================ */
 async function requestPdf(email) {
   const question = document.getElementById("question").value.trim();
@@ -306,11 +334,10 @@ async function requestPdf(email) {
     const result = await raw.json();
 
     if (!result.ok) {
-      return alert("Failed to send report: " + (result.error || "Unknown error"));
+      return alert("PDF generation failed: " + (result.error || "Unknown error"));
     }
 
     alert("Your detailed report has been emailed!");
-
   } catch (err) {
     alert("Server error: " + err.message);
   }
