@@ -1,37 +1,38 @@
+// /api/utils/analyze-palm.js
 import fs from "fs";
 
-export async function analyzePalmImage(filePath) {
+export async function analyzePalmImage(path) {
   try {
-    if (!filePath || !fs.existsSync(filePath)) {
+    if (!path || !fs.existsSync(path)) {
       return {
         hasImage: false,
-        summary: "Palm image not provided.",
+        summary: "No palm image uploaded.",
         features: {
           heartLine: "Unknown",
           headLine: "Unknown",
           lifeLine: "Unknown",
-          fateLine: "Unknown",
-        },
+          fateLine: "Unknown"
+        }
       };
     }
 
-    // Placeholder: replace later with OpenAI Vision
     return {
       hasImage: true,
-      summary: "Palm image received.",
+      summary: "Palm received — using general interpretation.",
       features: {
-        heartLine: "Strong emotional intuition",
-        headLine: "Adaptive thinking",
-        lifeLine: "Stable vitality",
-        fateLine: "Clear sense of direction",
-      },
+        heartLine: "Emotional depth and sensitivity.",
+        headLine: "Strong reasoning and intuition.",
+        lifeLine: "Vitality and grounded energy.",
+        fateLine: "Long-term purpose becoming clearer."
+      }
     };
+
   } catch (err) {
     return {
       hasImage: false,
-      summary: "Palm analysis error.",
+      summary: "Palm analysis failed.",
       features: {},
-      error: err.message,
+      error: err.message
     };
   }
 }
