@@ -1,5 +1,8 @@
 // /api/spiritual-report.js
-// Main endpoint for personal & technical spiritual reports
+// ---------------------------------------------------------
+// Main endpoint for personal + technical spiritual reports
+// Named-exports compatible version
+// ---------------------------------------------------------
 
 import formidable from "formidable";
 import fs from "fs";
@@ -9,41 +12,42 @@ import { classifyQuestion } from "./utils/classify-question.js";
 import { analyzePalmImage } from "./utils/analyze-palm.js";
 import { generateInsights } from "./utils/generate-insights.js";
 import { generatePDF } from "./utils/generate-pdf.js";
-import { sendEmail } from "./utils/send-email.js";
+import { sendEmailHTML } from "./utils/send-email.js";
 
-// Enable Vercel file uploads
+// Needed for file uploads
 export const config = {
   api: { bodyParser: false },
 };
 
-// ---------------------------------------------------------------------
+// ---------------------------------------------------------
 // CORS
-// ---------------------------------------------------------------------
+// ---------------------------------------------------------
 function allowCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-// ---------------------------------------------------------------------
+// ---------------------------------------------------------
 // MAIN HANDLER
-// ---------------------------------------------------------------------
+// ---------------------------------------------------------
 export default async function handler(req, res) {
   allowCors(res);
 
-  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
   try {
-    // -------------------------------------------------------------
-    // Parse FormData
-    // -------------------------------------------------------------
+    // ------------------------------
+    // 1. Parse multipart form
+    // ------------------------------
     const form = formidable({
       multiples: false,
       keepExtensions: true,
-      maxFileSize: 8 * 1024 * 1024,
       allowEmptyFiles: true,
     });
 
@@ -66,12 +70,12 @@ export default async function handler(req, res) {
     } = fields;
 
     if (!question) {
-      return res.status(400).json({ ok: false, error: "Question is required." });
+      return res.status(400).json({ ok: false, error: "Question required." });
     }
 
-    // -------------------------------------------------------------
-    // reCAPTCHA
-    // -------------------------------------------------------------
+    // ------------------------------
+    // 2. Verify Recaptcha
+    // ------------------------------
     const captcha = await verifyRecaptcha(recaptchaToken);
     if (!captcha.ok) {
       return res.status(403).json({
@@ -81,34 +85,25 @@ export default async function handler(req, res) {
       });
     }
 
-    // -------------------------------------------------------------
-    // Palmistry
-    // -------------------------------------------------------------
+    // ------------------------------
+    // 3. Palmistry image
+    // ------------------------------
     const palmImagePath = files?.palmImage?.filepath || null;
     const palmistryData = await analyzePalmImage(palmImagePath);
 
-    // -------------------------------------------------------------
-    // Classification (safe)
-    // -------------------------------------------------------------
-    let classification = await classifyQuestion(question);
+    // ------------------------------
+    // 4. Classification
+    // ------------------------------
+    const classification = await classifyQuestion(question);
 
-    if (!classification || !classification.intent) {
-      console.warn("⚠ classification result invalid, applying fallback logic");
-      classification = {
-        type: "personal",
-        intent: "general",
-        confidence: 0.2,
-        tone: "neutral",
-        source: "emergency-fallback",
-      };
-    }
+    // IMPORTANT FIX:
+    const safeIntent = classification?.intent || "general";
 
-    // User override
-    const personalMode = String(isPersonal) === "yes";
+    const personalMode = isPersonal === "yes";
 
-    // -------------------------------------------------------------
-    // Generate insights
-    // -------------------------------------------------------------
+    // ------------------------------
+    // 5. Generate insights
+    // ------------------------------
     const insights = await generateInsights({
       question,
       isPersonal: personalMode,
@@ -116,7 +111,7 @@ export default async function handler(req, res) {
       birthDate,
       birthTime,
       birthPlace,
-      classify: classification,
+      classify: { ...classification, intent: safeIntent },
       palmistryData,
       technicalMode: !personalMode,
     });
@@ -124,14 +119,13 @@ export default async function handler(req, res) {
     if (!insights.ok) {
       return res.status(500).json({
         ok: false,
-        error: "Insight generation failed",
-        detail: insights.error,
+        error: insights.error || "Insight generation failed.",
       });
     }
 
-    // -------------------------------------------------------------
-    // PERSONAL MODE — Generate PDF + email it
-    // -------------------------------------------------------------
+    // ------------------------------
+    // 6. PERSONAL MODE → build PDF + email
+    // ------------------------------
     if (personalMode) {
       const pdfBuffer = await generatePDF({
         mode: "personal",
@@ -146,23 +140,19 @@ export default async function handler(req, res) {
         palmistry: insights.palmistry,
       });
 
-      const emailResult = await sendEmail({
+      const result = await sendEmailHTML({
         to: email,
         subject: "Your Personal Spiritual Report",
-        html: `<p>Your detailed spiritual report is attached.</p>`,
+        html: `<p>Your detailed personal report is attached.</p>`,
         attachments: [
-          {
-            filename: "spiritual-report.pdf",
-            content: pdfBuffer,
-          },
+          { filename: "spiritual-report.pdf", content: pdfBuffer },
         ],
       });
 
-      if (!emailResult.ok) {
+      if (!result.success) {
         return res.status(500).json({
           ok: false,
-          error: "Email failed",
-          detail: emailResult.error,
+          error: result.error,
         });
       }
 
@@ -170,14 +160,14 @@ export default async function handler(req, res) {
         ok: true,
         mode: "personal",
         shortAnswer: insights.shortAnswer,
-        intent: classification.intent,
         pdfEmailed: true,
+        intent: safeIntent,
       });
     }
 
-    // -------------------------------------------------------------
-    // TECHNICAL MODE — short answer only
-    // -------------------------------------------------------------
+    // ------------------------------
+    // 7. TECHNICAL MODE → no PDF yet
+    // ------------------------------
     return res.status(200).json({
       ok: true,
       mode: "technical",
@@ -185,17 +175,14 @@ export default async function handler(req, res) {
       keyPoints: insights.keyPoints,
       explanation: insights.explanation,
       recommendations: insights.recommendations,
-      intent: classification.intent,
       pdfEmailed: false,
+      intent: safeIntent,
     });
-
   } catch (err) {
-    console.error("❌ spiritual-report ERROR:", err);
-
+    console.error("Spiritual-report error:", err);
     return res.status(500).json({
       ok: false,
-      error: "Server error",
-      detail: err.message,
+      error: err.message || "Server error",
     });
   }
 }
