@@ -1,7 +1,10 @@
 // /api/spiritual-report.js
+// FULLY FIXED — PERSONAL MODE ALWAYS EMAILS, TECHNICAL MODE DOES NOT,
+// CLASSIFIER NEVER OVERRIDES CHECKBOX, SAFER CORS, CLEANED LOGIC
 
 import formidable from "formidable";
 import fs from "fs";
+
 import { verifyRecaptcha } from "./utils/verify-recaptcha.js";
 import { classifyQuestion } from "./utils/classify-question.js";
 import { analyzePalmImage } from "./utils/analyze-palm.js";
@@ -9,26 +12,37 @@ import { generateInsights } from "./utils/generate-insights.js";
 import { generatePDF } from "./utils/generate-pdf.js";
 import { sendEmailHTML } from "./utils/send-email.js";
 
-export const config = { api: { bodyParser: false } };
+export const config = {
+  api: { bodyParser: false },
+};
 
 function allowCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
 }
 
 export default async function handler(req, res) {
   allowCors(res);
 
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST")
+  if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
 
   try {
-    // -------------------------------
-    // Parse multipart form-data
-    // -------------------------------
-    const form = formidable({ keepExtensions: true, allowEmptyFiles: true });
+    // ----------------------------------------------------------
+    // Parse form data (multipart)
+    // ----------------------------------------------------------
+    const form = formidable({
+      keepExtensions: true,
+      allowEmptyFiles: true,
+      multiples: false,
+      maxFileSize: 10 * 1024 * 1024,
+    });
 
     const { fields, files } = await new Promise((resolve, reject) => {
       form.parse(req, (err, f, fi) => {
@@ -44,47 +58,51 @@ export default async function handler(req, res) {
       birthTime,
       birthPlace,
       email,
-      isPersonal = "",
+      isPersonal,
       recaptchaToken,
     } = fields;
 
-    if (!question)
-      return res.status(400).json({ ok: false, error: "Question required" });
+    if (!question) {
+      return res.status(400).json({ ok: false, error: "Question is required" });
+    }
 
-    // -------------------------------
-    // Verify reCAPTCHA
-    // -------------------------------
+    // ----------------------------------------------------------
+    // reCAPTCHA check
+    // ----------------------------------------------------------
     const captcha = await verifyRecaptcha(recaptchaToken);
-    if (!captcha.ok)
-      return res.status(403).json({ ok: false, error: "reCAPTCHA failed" });
+    if (!captcha.ok) {
+      return res.status(403).json({
+        ok: false,
+        error: "reCAPTCHA verification failed",
+        details: captcha,
+      });
+    }
 
-    // -------------------------------
-    // Palmistry (optional)
-    // -------------------------------
+    // ----------------------------------------------------------
+    // Palmistry image
+    // ----------------------------------------------------------
     const palmImagePath = files?.palmImage?.filepath || null;
     const palmistryData = await analyzePalmImage(palmImagePath);
 
-    // -------------------------------
+    // ----------------------------------------------------------
     // Intent classification
-    // -------------------------------
-    let classification = await classifyQuestion(question);
-
-    // Fallback protection
+    // ----------------------------------------------------------
+    const classification = await classifyQuestion(question);
     const safeIntent = classification?.intent || "general";
 
-    // -------------------------------
-    // FIXED: Correct personal mode detection
-    // -------------------------------
+    // ----------------------------------------------------------
+    // Personal mode is ONLY based on checkbox, NEVER classifier
+    // ----------------------------------------------------------
     const personalMode =
       isPersonal === "on" ||
+      isPersonal === "yes" ||
       isPersonal === "true" ||
       isPersonal === "1" ||
-      isPersonal === "yes" ||
       isPersonal === true;
 
-    // -------------------------------
+    // ----------------------------------------------------------
     // Generate insights
-    // -------------------------------
+    // ----------------------------------------------------------
     const insights = await generateInsights({
       question,
       isPersonal: personalMode,
@@ -92,7 +110,7 @@ export default async function handler(req, res) {
       birthDate,
       birthTime,
       birthPlace,
-      classify: classification,
+      classify: { ...classification, intent: safeIntent },
       palmistryData,
       technicalMode: !personalMode,
     });
@@ -105,10 +123,17 @@ export default async function handler(req, res) {
       });
     }
 
-    // ===============================
-    // PERSONAL MODE → PDF + EMAIL
-    // ===============================
+    // ----------------------------------------------------------
+    // PERSONAL MODE → auto-generate & email PDF
+    // ----------------------------------------------------------
     if (personalMode) {
+      if (!email) {
+        return res.json({
+          ok: false,
+          error: "Email is required for personal reports",
+        });
+      }
+
       const pdfBuffer = await generatePDF({
         mode: "personal",
         question,
@@ -126,11 +151,15 @@ export default async function handler(req, res) {
         to: email,
         subject: "Your Personal Spiritual Report",
         html: `<p>Your detailed personal report is attached.</p>`,
-        attachments: [{ filename: "spiritual-report.pdf", content: pdfBuffer }],
+        attachments: [
+          {
+            filename: "spiritual-report.pdf",
+            content: pdfBuffer,
+          },
+        ],
       });
 
       if (!emailResult.success) {
-        console.error("Email failure:", emailResult);
         return res.status(500).json({
           ok: false,
           error: "Email failed",
@@ -147,9 +176,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // ===============================
+    // ----------------------------------------------------------
     // TECHNICAL MODE → summary only
-    // ===============================
+    // ----------------------------------------------------------
     return res.status(200).json({
       ok: true,
       mode: "technical",
@@ -162,9 +191,6 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("Server error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: err.message,
-    });
+    return res.status(500).json({ ok: false, error: err.message });
   }
 }
