@@ -16,25 +16,35 @@ function reduceNum(n) {
 }
 
 function calculateLifePath(dateStr) {
+  if (!dateStr || typeof dateStr !== "string") return null;
+
   const digits = dateStr.replace(/\D/g, "").split("").map(Number);
+  if (!digits.length) return null;
+
   let sum = digits.reduce((a, b) => a + b, 0);
   return reduceNum(sum);
 }
 
 function calculatePersonalYear(dob) {
+  if (!(dob instanceof Date) || isNaN(dob.getTime())) return null;
+
   const now = new Date();
   const sum =
     dob.getDate() +
     (dob.getMonth() + 1) +
     now.getFullYear();
+
   return reduceNum(sum);
 }
 
 function calculatePersonalMonth(dob) {
+  if (!(dob instanceof Date) || isNaN(dob.getTime())) return null;
+
   const now = new Date();
   const sum =
     (dob.getMonth() + 1) +
     (now.getMonth() + 1);
+
   return reduceNum(sum);
 }
 
@@ -50,6 +60,18 @@ const lifePathMeanings = {
   9: "Completion, compassion, purpose.",
   11: "Spiritual awakening, intuition.",
   22: "Master builder, major life achievements."
+};
+
+const personalYearMeanings = {
+  1: "A year of new beginnings and forward momentum.",
+  2: "A year of partnership, balance, intuition.",
+  3: "A year of creativity and self-expression.",
+  4: "A year of building structure and discipline.",
+  5: "A year of change and personal breakthroughs.",
+  6: "A year of responsibility, family, relationships.",
+  7: "A year of inner growth and spiritual clarity.",
+  8: "A year of power, manifestation and results.",
+  9: "A year of completion, renewal, transformation."
 };
 
 // --- Astrology Mock ------------------------------------------
@@ -76,6 +98,7 @@ export async function generateInsights({
   technicalMode
 }) {
   try {
+
     // --- Technical mode ----------------------------------------
     if (technicalMode) {
       return {
@@ -100,29 +123,33 @@ was processed with structured reasoning.
     }
 
     // --- Personal mode -----------------------------------------
-    const numerology =
-      birthDate
-        ? (() => {
-            const dob = new Date(birthDate);
-            const lp = calculateLifePath(birthDate);
-            const py = calculatePersonalYear(dob);
-            const pm = calculatePersonalMonth(dob);
-            return {
-              lifePath: lp,
-              personalYear: py,
-              personalMonth: pm,
-              personalMonthRange: `${pm}-${pm + 2}`,
-              lifePathMeaning: lifePathMeanings[lp] || "",
-              personalYearMeaning: lifePathMeanings[py] || ""
-            };
-          })()
-        : null;
+
+    // Normalize birthDate string
+    const birthDateStr = birthDate ? String(birthDate).trim() : "";
+    const dob = birthDateStr ? new Date(birthDateStr) : null;
+
+    let numerology = null;
+
+    if (birthDateStr && dob && !isNaN(dob.getTime())) {
+      const lp = calculateLifePath(birthDateStr);
+      const py = calculatePersonalYear(dob);
+      const pm = calculatePersonalMonth(dob);
+
+      numerology = {
+        lifePath: lp,
+        personalYear: py,
+        personalMonth: pm,
+        personalMonthRange: pm ? `${pm}-${pm + 2}` : "",
+        lifePathMeaning: lifePathMeanings[lp] || "",
+        personalYearMeaning: personalYearMeanings[py] || ""
+      };
+    }
 
     const astrology = computeAstrologyMock(birthDate, birthTime, birthPlace);
 
     const triad = synthesizeTriad({
       question,
-      intent: classify.intent || "general",
+      intent: classify?.intent || "general",
       astrology,
       numerology,
       palmistry: palmistryData
