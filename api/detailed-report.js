@@ -1,9 +1,13 @@
 // /api/detailed-report.js
-// Generates a full technical (coding + financial intelligence) PDF
+// Generates TECHNICAL PDF + sends via email
 
 import { generateInsights } from "./utils/generate-insights.js";
 import { generatePDF } from "./utils/generate-pdf.js";
 import { sendEmailHTML } from "./utils/send-email.js";
+
+export const config = {
+  api: { bodyParser: true }
+};
 
 function allowCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -11,35 +15,32 @@ function allowCors(res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-export const config = {
-  api: { bodyParser: true }
-};
-
 export default async function handler(req, res) {
   allowCors(res);
 
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST")
-    return res.status(405).json({ ok: false, error: "Method not allowed." });
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
 
   try {
-    const { question, email } = req.body;
+    const { question, email } = req.body || {};
 
-    if (!question)
+    if (!question || !String(question).trim()) {
       return res
         .status(400)
-        .json({ ok: false, error: "Question is required" });
+        .json({ ok: false, error: "Question is required." });
+    }
 
-    if (!email)
-      return res.status(400).json({ ok: false, error: "Email is required" });
+    if (!email || !String(email).trim()) {
+      return res.status(400).json({ ok: false, error: "Email is required." });
+    }
 
-    // ------------------------------------------
-    // Technical insights (financial + coding)
-    // ------------------------------------------
+    // 1) Generate technical insights (GPT-4.1, finance + coding tuned)
     const insights = await generateInsights({
-      question,
-      technicalMode: true,
-      isPersonal: false
+      question: String(question),
+      isPersonal: false,
+      technicalMode: true
     });
 
     if (!insights.ok) {
@@ -50,31 +51,31 @@ export default async function handler(req, res) {
       });
     }
 
-    // ------------------------------------------
-    // Generate full technical PDF
-    // ------------------------------------------
+    // 2) Build TECHNICAL PDF
     const pdfBuffer = await generatePDF({
       mode: "technical",
-      question,
+      question: String(question),
       insights
     });
 
-    // ------------------------------------------
-    // Email PDF
-    // ------------------------------------------
+    // 3) Email PDF
     const emailResult = await sendEmailHTML({
-      to: email,
+      to: String(email),
       subject: "Your Detailed Technical Report",
       html: `<p>Your detailed technical report is attached.</p>`,
       attachments: [
-        { filename: "technical-report.pdf", content: pdfBuffer }
+        {
+          filename: "technical-report.pdf",
+          content: pdfBuffer
+        }
       ]
     });
 
     if (!emailResult.success) {
+      console.error("EMAIL ERROR (technical):", emailResult);
       return res.status(500).json({
         ok: false,
-        error: "Email failed",
+        error: "Email delivery failed",
         detail: emailResult.error
       });
     }
@@ -83,14 +84,13 @@ export default async function handler(req, res) {
       ok: true,
       pdfEmailed: true,
       shortAnswer: insights.shortAnswer,
-      sentAt: new Date().toISOString()
+      stampedAt: new Date().toISOString()
     });
-
   } catch (err) {
     console.error("DETAILED REPORT ERROR:", err);
     return res.status(500).json({
       ok: false,
-      error: err.message
+      error: err.message || "Server error"
     });
   }
 }
