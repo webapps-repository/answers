@@ -1,15 +1,17 @@
 // /api/spiritual-report.js
-// Main endpoint for personal + technical questions
+// Main endpoint for PERSONAL + TECHNICAL questions
 
 import formidable from "formidable";
 import fs from "fs";
+import path from "path";
 
 import { verifyRecaptcha } from "./utils/verify-recaptcha.js";
 import { classifyQuestion } from "./utils/classify-question.js";
 import { analyzePalmImage } from "./utils/analyze-palm.js";
 import { generateInsights } from "./utils/generate-insights.js";
 import { generatePDF } from "./utils/generate-pdf.js";
-import { sendEmailHTML } from "./utils/send-email.js";
+import { sendEmailHTML } from "./utils/email.js";
+import { validateUploadedFile } from "./utils/file-validators.js";
 
 export const config = {
   api: { bodyParser: false }
@@ -29,10 +31,15 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
-    // -----------------------------------------
-    // Parse multipart/form-data
-    // -----------------------------------------
-    const form = formidable({ keepExtensions: true, allowEmptyFiles: true });
+    // ====================================================
+    // FORM PARSE
+    // ====================================================
+    const form = formidable({
+      keepExtensions: true,
+      allowEmptyFiles: true,
+      multiples: false,
+      maxFileSize: 12 * 1024 * 1024 // 12MB
+    });
 
     const { fields, files } = await new Promise((resolve, reject) => {
       form.parse(req, (err, f, fi) => {
@@ -41,82 +48,107 @@ export default async function handler(req, res) {
       });
     });
 
-    const {
-      question,
-      fullName,
-      birthDate,
-      birthTime,
-      birthPlace,
-      email,
-      isPersonal,
-      recaptchaToken
-    } = fields;
+    // Normalize values
+    const question = String(fields.question || "").trim();
+    const isPersonal =
+      fields.isPersonal === "true" ||
+      fields.isPersonal === true ||
+      fields.isPersonal === "yes";
 
-    if (!question || String(question).trim().length === 0)
-      return res.status(400).json({ ok: false, error: "Question required" });
+    const email = fields.email ? String(fields.email).trim() : "";
+    const fullName = fields.fullName || "";
+    const birthDate = fields.birthDate || "";
+    const birthTime = fields.birthTime || "";
+    const birthPlace = fields.birthPlace || "";
+    const recaptchaToken = fields.recaptchaToken || "";
 
-    // -----------------------------------------
-    // Verify reCAPTCHA
-    // -----------------------------------------
-    const captcha = await verifyRecaptcha(recaptchaToken);
-    if (!captcha.ok)
-      return res.status(403).json({ ok: false, error: "reCAPTCHA failed" });
-
-    // -----------------------------------------
-    // FIXED: Palmistry image extraction
-    // Formidable sometimes wraps files in arrays,
-    // Shopify sometimes uses "path" instead of "filepath".
-    // -----------------------------------------
-    let palmImagePath = null;
-
-    if (files?.palmImage) {
-      const img = Array.isArray(files.palmImage)
-        ? files.palmImage[0]
-        : files.palmImage;
-
-      palmImagePath = img?.filepath || img?.path || null;
+    if (!question || question.length < 3) {
+      return res.status(400).json({
+        ok: false,
+        error: "Question required",
+        fresh: true
+      });
     }
 
-    const palmistryData = await analyzePalmImage(palmImagePath);
+    // ====================================================
+    // RECAPTCHA
+    // ====================================================
+    const captcha = await verifyRecaptcha(recaptchaToken);
+    if (!captcha.ok)
+      return res.status(403).json({
+        ok: false,
+        error: "reCAPTCHA failed",
+        fresh: true
+      });
 
-    // -----------------------------------------
-    // Intent classification
-    // -----------------------------------------
+    // ====================================================
+    // PALM IMAGE FIX
+    // ====================================================
+    let palmFilePath = null;
+    if (files?.palmImage?.filepath && fs.existsSync(files.palmImage.filepath)) {
+      palmFilePath = files.palmImage.filepath;
+    }
+
+    const palmistryData = await analyzePalmImage(palmFilePath);
+
+    // ====================================================
+    // TECHNICAL FILE (optional)
+    // ====================================================
+    let techFile = null;
+
+    if (files?.techFile?.filepath && fs.existsSync(files.techFile.filepath)) {
+      const safe = validateUploadedFile(files.techFile);
+      if (!safe.ok) {
+        fs.unlinkSync(files.techFile.filepath);
+        return res.status(400).json({
+          ok: false,
+          error: safe.error,
+          fresh: true
+        });
+      }
+      techFile = files.techFile.filepath;
+    }
+
+    // ====================================================
+    // CLASSIFY INTENT
+    // ====================================================
     const classification = await classifyQuestion(question);
     const safeIntent = classification?.intent || "general";
 
-    const personalMode =
-      isPersonal === "yes" ||
-      isPersonal === "true" ||
-      isPersonal === true;
-
-    // -----------------------------------------
-    // Unified Insights
-    // -----------------------------------------
+    // ====================================================
+    // INSIGHTS
+    // ====================================================
     const insights = await generateInsights({
       question,
-      isPersonal: personalMode,
+      isPersonal,
       fullName,
       birthDate,
       birthTime,
       birthPlace,
       classify: { ...classification, intent: safeIntent },
       palmistryData,
-      technicalMode: !personalMode
+      technicalMode: !isPersonal,
+      techFilePath: techFile
     });
+
+    // delete tech file after reading
+    if (techFile && fs.existsSync(techFile)) {
+      fs.unlink(techFile, () => {});
+    }
 
     if (!insights.ok) {
       return res.status(500).json({
         ok: false,
         error: "Insight generation failed",
-        detail: insights.error
+        detail: insights.error,
+        fresh: true
       });
     }
 
-    // =====================================================
-    // PERSONAL MODE → PDF AUTO EMAIL
-    // =====================================================
-    if (personalMode) {
+    // ====================================================
+    // PERSONAL MODE → AUTO EMAIL
+    // ====================================================
+    if (isPersonal) {
       const pdfBuffer = await generatePDF({
         mode: "personal",
         question,
@@ -139,27 +171,22 @@ export default async function handler(req, res) {
         ]
       });
 
-      if (!emailResult.success) {
-        console.error("EMAIL ERROR:", emailResult);
-        return res.status(500).json({
-          ok: false,
-          error: "Email delivery failed",
-          detail: emailResult.error
-        });
-      }
-
       return res.status(200).json({
         ok: true,
         mode: "personal",
         shortAnswer: insights.shortAnswer,
-        intent: safeIntent,
-        pdfEmailed: true
+        pdfEmailed: emailResult.success ? true : false,
+        emailStatus: emailResult.success
+          ? "sent"
+          : "failed",
+        fresh: true,
+        intent: safeIntent
       });
     }
 
-    // =====================================================
-    // TECHNICAL MODE → Return short summary & data
-    // =====================================================
+    // ====================================================
+    // TECHNICAL MODE → SUMMARY ONLY
+    // ====================================================
     return res.status(200).json({
       ok: true,
       mode: "technical",
@@ -168,14 +195,16 @@ export default async function handler(req, res) {
       explanation: insights.explanation,
       recommendations: insights.recommendations,
       pdfEmailed: false,
+      emailStatus: "none",
+      fresh: true,
       intent: safeIntent
     });
-
   } catch (err) {
     console.error("SERVER ERROR:", err);
     return res.status(500).json({
       ok: false,
-      error: err.message || "Server failure"
+      error: err.message,
+      fresh: true
     });
   }
 }
