@@ -1,13 +1,14 @@
 // /api/detailed-report.js
-// Generates TECHNICAL PDF + sends via email
+// Generates a full TECHNICAL PDF and emails it to the user on demand.
 
 import { generateInsights } from "./utils/generate-insights.js";
 import { generatePDF } from "./utils/generate-pdf.js";
-import { sendEmailHTML } from "./utils/send-email.js";
+import { sendEmailHTML } from "./utils/email.js";
+import { validateUploadedFile } from "./utils/file-validators.js";
+import formidable from "formidable";
+import fs from "fs";
 
-export const config = {
-  api: { bodyParser: true }
-};
+export const config = { api: { bodyParser: false } };
 
 function allowCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -19,29 +20,85 @@ export default async function handler(req, res) {
   allowCors(res);
 
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ ok: false, error: "Method not allowed" });
-  }
 
   try {
-    const { question, email } = req.body || {};
+    // =====================================================
+    // PARSE JSON OR FORM
+    // This endpoint must support:
+    // - JSON body (from modal send)
+    // - FormData (future compatibility)
+    // =====================================================
+    let email = "";
+    let question = "";
+    let techFilePath = null;
 
-    if (!question || !String(question).trim()) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Question is required." });
+    // Detect whether request is JSON or multipart
+    const contentType = req.headers["content-type"] || "";
+
+    if (contentType.includes("multipart/form-data")) {
+      const form = formidable({
+        keepExtensions: true,
+        allowEmptyFiles: true,
+        multiples: false,
+        maxFileSize: 12 * 1024 * 1024
+      });
+
+      const { fields, files } = await new Promise((resolve, reject) => {
+        form.parse(req, (err, f, fi) => {
+          if (err) reject(err);
+          else resolve({ fields: f, files: fi });
+        });
+      });
+
+      question = String(fields.question || "").trim();
+      email = String(fields.email || "").trim();
+
+      if (files?.techFile?.filepath && fs.existsSync(files.techFile.filepath)) {
+        const safe = validateUploadedFile(files.techFile);
+        if (!safe.ok) {
+          fs.unlinkSync(files.techFile.filepath);
+          return res.status(400).json({ ok: false, error: safe.error });
+        }
+        techFilePath = files.techFile.filepath;
+      }
+    } else {
+      // JSON request (from modal)
+      const body = await new Promise((resolve) => {
+        let data = "";
+        req.on("data", (chunk) => (data += chunk));
+        req.on("end", () => resolve(JSON.parse(data || "{}")));
+      });
+
+      question = String(body.question || "").trim();
+      email = String(body.email || "").trim();
     }
 
-    if (!email || !String(email).trim()) {
-      return res.status(400).json({ ok: false, error: "Email is required." });
-    }
+    // =====================================================
+    // VALIDATION
+    // =====================================================
+    if (!question || question.length < 3)
+      return res.status(400).json({ ok: false, error: "Question required" });
 
-    // 1) Generate technical insights (GPT-4.1, finance + coding tuned)
+    if (!email)
+      return res.status(400).json({ ok: false, error: "Email required" });
+
+    // =====================================================
+    // GENERATE TECHNICAL INSIGHTS
+    // =====================================================
     const insights = await generateInsights({
-      question: String(question),
+      question,
       isPersonal: false,
-      technicalMode: true
+      classify: { intent: "technical", type: "technical" },
+      palmistryData: null,
+      technicalMode: true,
+      techFilePath
     });
+
+    if (techFilePath && fs.existsSync(techFilePath)) {
+      fs.unlink(techFilePath, () => {});
+    }
 
     if (!insights.ok) {
       return res.status(500).json({
@@ -51,31 +108,31 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Build TECHNICAL PDF
+    // =====================================================
+    // GENERATE TECHNICAL PDF
+    // =====================================================
     const pdfBuffer = await generatePDF({
       mode: "technical",
-      question: String(question),
+      question,
       insights
     });
 
-    // 3) Email PDF
+    // =====================================================
+    // EMAIL THE PDF
+    // =====================================================
     const emailResult = await sendEmailHTML({
-      to: String(email),
+      to: email,
       subject: "Your Detailed Technical Report",
       html: `<p>Your detailed technical report is attached.</p>`,
       attachments: [
-        {
-          filename: "technical-report.pdf",
-          content: pdfBuffer
-        }
+        { filename: "technical-report.pdf", content: pdfBuffer }
       ]
     });
 
     if (!emailResult.success) {
-      console.error("EMAIL ERROR (technical):", emailResult);
       return res.status(500).json({
         ok: false,
-        error: "Email delivery failed",
+        error: "Email failed",
         detail: emailResult.error
       });
     }
@@ -83,14 +140,15 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       pdfEmailed: true,
+      emailStatus: "sent",
       shortAnswer: insights.shortAnswer,
-      stampedAt: new Date().toISOString()
+      sentAt: new Date().toISOString()
     });
   } catch (err) {
     console.error("DETAILED REPORT ERROR:", err);
     return res.status(500).json({
       ok: false,
-      error: err.message || "Server error"
+      error: err.message || "Server failure"
     });
   }
 }
