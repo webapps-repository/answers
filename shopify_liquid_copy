@@ -115,9 +115,12 @@ const API_PDF = "https://answers-rust.vercel.app/api/detailed-report";
 
 let recaptchaId = null;
 
+/* ============================================================
+   RECAPTCHA
+============================================================ */
 function onLoadRecaptcha() {
   recaptchaId = grecaptcha.render("recaptcha-box", {
-    sitekey: "{{ settings.recaptcha_site_key }}",
+    sitekey: "6LdAOgYsAAAAAFgNlxLkahtIAbZc4XcIJt2hfLsj",
     size: "normal"
   });
 }
