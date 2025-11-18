@@ -21,6 +21,16 @@ function allowCors(res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+// -----------------------------------------
+// Field normalizer (critical patch)
+// -----------------------------------------
+function safeField(v) {
+  if (!v) return "";
+  if (typeof v === "string") return v.trim();
+  if (Array.isArray(v)) return (v[0] || "").toString().trim();
+  return String(v).trim();
+}
+
 export default async function handler(req, res) {
   allowCors(res);
 
@@ -41,24 +51,29 @@ export default async function handler(req, res) {
       });
     });
 
-    const {
-      question,
-      fullName,
-      birthDate,
-      birthTime,
-      birthPlace,
-      email,
-      isPersonal,
-      recaptchaToken
-    } = fields;
+    // -----------------------------------------
+    // Normalize all incoming fields
+    // (Fixes: trim is not a function, empty arrays, objects)
+    // -----------------------------------------
+    const question     = safeField(fields.question);
+    const fullName     = safeField(fields.fullName);
+    const birthDate    = safeField(fields.birthDate);
+    const birthTime    = safeField(fields.birthTime);
+    const birthPlace   = safeField(fields.birthPlace);
+    const email        = safeField(fields.email);
+    const isPersonal   = safeField(fields.isPersonal);
+    const recaptchaTok = safeField(fields.recaptchaToken);
 
-    if (!question || question.trim().length === 0)
+    // -----------------------------------------
+    // Validate
+    // -----------------------------------------
+    if (!question || question.length < 2)
       return res.status(400).json({ ok: false, error: "Question required" });
 
     // -----------------------------------------
     // Verify reCAPTCHA
     // -----------------------------------------
-    const captcha = await verifyRecaptcha(recaptchaToken);
+    const captcha = await verifyRecaptcha(recaptchaTok);
     if (!captcha.ok)
       return res.status(403).json({ ok: false, error: "reCAPTCHA failed" });
 
@@ -71,14 +86,16 @@ export default async function handler(req, res) {
     // -----------------------------------------
     // Intent classification
     // -----------------------------------------
-    const classification = await classifyQuestion(question);
+    const classification = await classifyQuestion(question || "");
     const safeIntent = classification?.intent || "general";
 
-    const personalMode =
-      isPersonal === "yes" || isPersonal === "true" || isPersonal === true;
+    // Shopify checkboxes send: "on"
+    const personalMode = ["yes", "true", "on", "1"].includes(
+      isPersonal.toLowerCase()
+    );
 
     // -----------------------------------------
-    // Unified Insights
+    // Unified Insights (personal or technical)
     // -----------------------------------------
     const insights = await generateInsights({
       question,
@@ -121,9 +138,7 @@ export default async function handler(req, res) {
         to: email,
         subject: "Your Personal Spiritual Report",
         html: `<p>Your personal spiritual report is attached.</p>`,
-        attachments: [
-          { filename: "spiritual-report.pdf", content: pdfBuffer }
-        ]
+        attachments: [{ filename: "spiritual-report.pdf", content: pdfBuffer }]
       });
 
       if (!emailResult.success) {
@@ -145,7 +160,7 @@ export default async function handler(req, res) {
     }
 
     // =====================================================
-    // TECHNICAL MODE → Return short summary & data
+    // TECHNICAL MODE → Return summary
     // =====================================================
     return res.status(200).json({
       ok: true,
