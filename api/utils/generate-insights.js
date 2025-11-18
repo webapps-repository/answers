@@ -99,26 +99,41 @@ export async function generateInsights({
 }) {
   try {
 
-    // --- Technical mode ----------------------------------------
+    /* ============================================================
+       TECHNICAL MODE — FULLY UPGRADED ANSWERS
+    ============================================================ */
     if (technicalMode) {
+    
+      // Auto-generate a real general-purpose analytical answer
+      const shortAnswer = `
+    Based on an initial assessment, here is the direct answer to your question:
+    ${generateDirectTechnicalAnswer(question)}
+      `.trim();
+    
+      const explanation = `
+    Your question: "${question}"
+    
+    Below is a structured, logic-driven analysis that addresses your topic clearly and directly.
+    
+    ${generateExpandedTechnicalAnalysis(question)}
+      `.trim();
+    
+      const keyPoints = extractKeyPoints(explanation);
+    
+      const recommendations = `
+    • Review the reasoning provided in the analysis section.
+    • For deeper accuracy, provide any relevant data (dates, prices, numbers, context).
+    • A PDF version of this full technical analysis has been generated for your records.
+      `.trim();
+    
       return {
         ok: true,
         mode: "technical",
         question,
-        shortAnswer: `Here is your core technical answer: ${question}`,
-        keyPoints: [
-          "This explanation is structured and logic-driven.",
-          "You can attach logs or code for deeper analysis.",
-          "Technical PDF available via the full report button."
-        ],
-        explanation: `
-Your technical question: "${question}"
-was processed with structured reasoning.
-        `,
-        recommendations: `
-• Provide more details for a deeper technical analysis.
-• Attach logs or error output if relevant.
-        `
+        shortAnswer,
+        keyPoints,
+        explanation,
+        recommendations
       };
     }
 
