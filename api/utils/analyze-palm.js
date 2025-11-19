@@ -1,144 +1,58 @@
 // /api/utils/analyze-palm.js
-// Advanced palmistry analyzer using GPT-4.1 vision when available.
-// Falls back to a generic interpretation if anything fails.
+// Placeholder palmistry analyzer with structured output
+// Later you can replace this with OpenAI Vision or TF segmentation
 
 import fs from "fs";
-import OpenAI from "openai";
-
-const openai =
-  process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
 export async function analyzePalmImage(filePath) {
   try {
-    // No file → generic palmistry with "no image" note
     if (!filePath || !fs.existsSync(filePath)) {
       return {
         hasImage: false,
         summary:
-          "No palm image was provided. General palmistry principles are applied instead.",
+          "No palm image was provided, so this part of the reading uses general palmistry principles.",
         features: {
-          heartLine: "Emotional capacity and style are interpreted generically.",
-          headLine: "Thinking patterns and decisions are interpreted in a general way.",
-          lifeLine: "Vitality and life rhythm are interpreted in a broad, symbolic sense.",
-          fateLine: "Life direction and purpose are explored through general patterns.",
-          sunLine:
-            "Potential for recognition and creative self-expression is interpreted symbolically.",
-          marriageLines:
-            "Relationship patterns are interpreted via general palmistry principles."
-        }
+          heartLine: "Unknown",
+          headLine: "Unknown",
+          lifeLine: "Unknown",
+          fateLine: "Unknown",
+          marriageLines: "Unknown",
+        },
       };
     }
 
-    // If no OpenAI key → fallback with "image received"
-    if (!openai) {
-      return {
-        hasImage: true,
-        summary:
-          "Palm image was received, but advanced image analysis is not active. General interpretations are used.",
-        features: {
-          heartLine:
-            "Indicates a deep sensitivity and strong emotional capacity in relationships.",
-          headLine:
-            "Suggests active mental energy, adaptability, and intuitive decision-making.",
-          lifeLine:
-            "Shows steady resilience, life force, and a capacity to recover from challenges.",
-          fateLine:
-            "Indicates a growing sense of life direction and evolving purpose.",
-          sunLine:
-            "Points to creative visibility, recognition potential, or a desire to be seen.",
-          marriageLines:
-            "Highlights the potential for meaningful bonds and emotional depth in relationships."
-        }
-      };
-    }
-
-    // ---------- GPT-4.1 Vision analysis ----------
-    const imageBuffer = fs.readFileSync(filePath);
-    const b64 = imageBuffer.toString("base64");
-
-    const prompt = `
-You are a professional palmistry reader.
-
-Look at the palm photo and return a STRICT JSON object with this shape:
-
-{
-  "summary": "2–4 sentence overview of the palm's overall energy, themes, and life tone.",
-  "features": {
-    "heartLine": "Short palmistry-style description.",
-    "headLine": "Short palmistry-style description.",
-    "lifeLine": "Short palmistry-style description.",
-    "fateLine": "Short palmistry-style description (or 'not clearly visible').",
-    "sunLine": "Short palmistry-style description (or 'not clearly visible').",
-    "marriageLines": "Short palmistry-style description."
-  }
-}
-
-No extra keys, no commentary, no markdown. JSON ONLY.
-`;
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1", // vision-capable in new API
-      temperature: 0.4,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${b64}`
-              }
-            }
-          ]
-        }
-      ]
-    });
-
-    const raw = completion.choices?.[0]?.message?.content || "{}";
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      // If model didn't perfectly obey JSON, just wrap raw text
-      parsed = {
-        summary: raw,
-        features: {}
-      };
-    }
-
+    // For now: basic placeholder. Later: run OpenAI Vision here.
     return {
       hasImage: true,
-      summary: parsed.summary || "Palmistry summary unavailable.",
+      summary:
+        "Palm image was successfully received. This pre-upgrade version uses general palmistry principles while advanced image analysis is being prepared.",
       features: {
-        heartLine: parsed.features?.heartLine || "Not clearly interpreted.",
-        headLine: parsed.features?.headLine || "Not clearly interpreted.",
-        lifeLine: parsed.features?.lifeLine || "Not clearly interpreted.",
-        fateLine: parsed.features?.fateLine || "Not clearly interpreted.",
-        sunLine: parsed.features?.sunLine || "Not clearly interpreted.",
+        heartLine:
+          "Strong emotional sensitivity and desire for deep, sincere connection.",
+        headLine:
+          "Active mental energy, intuitive thinking, and flexible decision-making.",
+        lifeLine:
+          "Solid vitality with an ongoing theme of growth through real-world experience.",
+        fateLine:
+          "A sense of direction that strengthens over time, reflecting emerging purpose.",
         marriageLines:
-          parsed.features?.marriageLines || "Not clearly interpreted."
-      }
+          "Potential for meaningful bonds that deepen as you become clearer about your needs.",
+      },
     };
   } catch (err) {
-    console.error("Palmistry analysis failed:", err);
+    console.error("Palm analysis error:", err);
     return {
-      hasImage: !!filePath,
+      hasImage: false,
       summary:
-        "Palmistry analysis encountered an internal error. General interpretations are used instead.",
+        "Palmistry analysis encountered an internal error. General principles are used instead.",
       features: {
-        heartLine: "Emotional patterns are significant but require reflection.",
-        headLine: "Your mental energy is active and adaptable.",
-        lifeLine:
-          "Life force is resilient, with potential for renewal after challenges.",
-        fateLine:
-          "Life direction develops over time through key choices and turning points.",
-        sunLine:
-          "Creative and personal visibility may grow as you step into your purpose.",
-        marriageLines:
-          "Important relationships and emotional commitments play a meaningful role."
+        heartLine: "Unknown",
+        headLine: "Unknown",
+        lifeLine: "Unknown",
+        fateLine: "Unknown",
+        marriageLines: "Unknown",
       },
-      error: err.message
+      error: err.message,
     };
   }
 }
