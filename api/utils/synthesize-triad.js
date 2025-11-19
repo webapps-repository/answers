@@ -1,76 +1,60 @@
 // /api/utils/synthesize-triad.js
-// Triad AI alignment: astrology + numerology + palmistry → unified answer
+// This file merges astrology + numerology + palmistry + question intent
+// into a single unified interpretation for PDFs and on-page display.
 
-import OpenAI from "openai";
-
-const openai =
-  process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
-
-// Fallback (no AI / AI error) → static generator
-function staticTriad({
+export function synthesizeTriad({
   question,
-  intent,
+  intent, // “love”, “career”, “spiritual”, “money”, “health”, etc.
   astrology,
   numerology,
-  palmistry
+  palmistry,
 }) {
-  const shortAnswer = `
-Your question: "${question}"
+  const shortAnswer = generateShortAnswer({
+    question,
+    intent,
+    astrology,
+    numerology,
+    palmistry,
+  });
 
-Based on the combined energies of your chart, numerology, and palm, there is a meaningful
-shift unfolding in the area of ${intent}. You are being guided toward greater clarity,
-alignment, and self-awareness around this topic.
-  `.trim();
+  const astroInterpretation = generateAstrologicalInterpretation({
+    question,
+    intent,
+    astrology,
+  });
 
-  const astroInterpretation = `
-Astrologically, your Sun, Moon, and Rising signs shape how you experience this question.
+  const numerologyInterpretation = generateNumerologicalInterpretation({
+    question,
+    intent,
+    numerology,
+  });
 
-• Sun: ${astrology?.sun}
-• Moon: ${astrology?.moon}
-• Rising: ${astrology?.rising}
+  const palmInterpretation = generatePalmistryInterpretation({
+    question,
+    intent,
+    palmistry,
+  });
 
-These placements describe your core drive, emotional needs, and the way you show up in the world.
-  `;
+  const combined = generateCombinedSynthesis({
+    question,
+    intent,
+    astrology,
+    numerology,
+    palmistry,
+  });
 
-  const numerologyInterpretation = `
-Numerology highlights the deeper life themes and timing around your question.
+  const timeline = generateTimeline({
+    intent,
+    astrology,
+    numerology,
+  });
 
-• Life Path ${numerology?.lifePath}: ${numerology?.lifePathMeaning || "Key life lessons and direction."}
-• Personal Year ${numerology?.personalYear}: Emphasises growth in the area of ${intent}.
-• Personal Month ${numerology?.personalMonth}: A short-term window for adjusting course.
-  `;
-
-  const palmInterpretation = `
-Palmistry adds insight into how you actually live and embody your path.
-
-• Heart Line: ${palmistry?.features?.heartLine}
-• Head Line: ${palmistry?.features?.headLine}
-• Life Line: ${palmistry?.features?.lifeLine}
-• Fate Line: ${palmistry?.features?.fateLine}
-• Sun Line: ${palmistry?.features?.sunLine}
-• Marriage Lines: ${palmistry?.features?.marriageLines}
-  `;
-
-  const combined = `
-When all three systems are combined, your question "${question}" is framed as a key turning point.
-Astrology shows the "why", numerology shows the "when", and palmistry shows "how you actually carry it".
-
-Together they indicate that your path in ${intent} is moving through a period of adjustment that
-ultimately supports deeper authenticity and long-term alignment.
-  `;
-
-  const timeline = `
-The strongest movement appears during your Personal Year ${numerology?.personalYear},
-especially around months ${numerology?.personalMonthRange || "that emphasise reflection and realignment"}.
-  `;
-
-  const recommendations = `
-Recommendations:
-1. Reflect honestly on what feels aligned vs. forced in this area of life.
-2. Use the current numerology cycle to time important decisions rather than rushing.
-3. Pay attention to emotional and intuitive signals shown in your Moon and heart line.
-4. Take small, concrete steps that honour your true direction rather than old habits.
-  `;
+  const recommendations = generateRecommendations({
+    intent,
+    astrology,
+    numerology,
+    palmistry,
+  });
 
   return {
     shortAnswer,
@@ -79,95 +63,108 @@ Recommendations:
     palmInterpretation,
     combined,
     timeline,
-    recommendations
+    recommendations,
   };
 }
 
-// ================================================
-// MAIN: GPT-4.1 triad synthesis with fallback
-// ================================================
-export async function synthesizeTriad({
-  question,
-  intent,
-  astrology,
-  numerology,
-  palmistry
-}) {
-  // If no OpenAI key → static fallback
-  if (!openai) {
-    return staticTriad({ question, intent, astrology, numerology, palmistry });
-  }
+// ========================================================================
+// SUPPORTING GENERATORS
+// ========================================================================
 
-  try {
-    const prompt = `
-You are a world-class spiritual analyst combining:
-
-• Western astrology (Placidus, tropical)
-• Pythagorean numerology
-• Classical + modern palmistry
-
-User question:
-"${question}"
-
-Context:
-- Intent / theme: ${intent}
-- Astrology (summary JSON will be provided).
-- Numerology (life path, cycles, etc.).
-- Palmistry (lines and features).
-
-You MUST return STRICT JSON ONLY, no markdown, exactly in this shape:
-
-{
-  "shortAnswer": "2–4 sentences directly answering the user's question in plain language.",
-  "astroInterpretation": "2–5 paragraphs explaining the astrological picture in relation to the question.",
-  "numerologyInterpretation": "2–4 paragraphs interpreting the numerology cycles and core numbers.",
-  "palmInterpretation": "2–4 paragraphs interpreting the palm features in context of the question.",
-  "combined": "2–4 paragraphs weaving all three systems into one clear story.",
-  "timeline": "1–3 paragraphs focusing on timing windows, cycles, and when energy is strongest.",
-  "recommendations": "A set of 4–8 practical recommendations, in paragraph form or light bullets."
+function generateShortAnswer({ question, intent }) {
+  return `Based on your current energy and overall pattern, the situation around your question — "${question}" — is evolving strongly in the area of ${intent}. You are being guided toward greater clarity and alignment as you move forward.`;
 }
 
-Make the tone grounded, kind, specific, and realistic. Avoid fatalism, and emphasise agency + consent.
-`;
+function generateAstrologicalInterpretation({ question, intent, astrology }) {
+  return `
+Your astrological pattern sheds light on your question about ${intent}.
+Your key placements suggest how you naturally respond to this situation:
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
-      temperature: 0.5,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You synthesise astrology, numerology, and palmistry into grounded, practical guidance."
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            instructions: prompt,
-            question,
-            intent,
-            astrology,
-            numerology,
-            palmistry
-          })
-        }
-      ]
-    });
+• Sun: ${astrology?.sun || "N/A"}
+• Moon: ${astrology?.moon || "N/A"}
+• Rising: ${astrology?.rising || "N/A"}
 
-    const parsed = completion.choices[0].message.parsed;
+Together these show how your personality, emotional life, and outer presentation all connect to "${question}".
+`.trim();
+}
 
-    return {
-      shortAnswer: parsed.shortAnswer,
-      astroInterpretation: parsed.astroInterpretation,
-      numerologyInterpretation: parsed.numerologyInterpretation,
-      palmInterpretation: parsed.palmInterpretation,
-      combined: parsed.combined,
-      timeline: parsed.timeline,
-      recommendations: parsed.recommendations
-    };
-  } catch (err) {
-    console.error("Triad LLM error:", err);
-    // Safe fallback
-    return staticTriad({ question, intent, astrology, numerology, palmistry });
+function generateNumerologicalInterpretation({ question, intent, numerology }) {
+  if (!numerology) {
+    return `
+Numerology data was not fully provided, so this reading focuses more on your astrology and palmistry patterns.
+Even without full numbers, there is still a sense of timing and life themes surrounding your question about ${intent}.
+    `.trim();
   }
+
+  return `
+Numerologically, your Life Path (${numerology.lifePath}) and current Personal Year (${numerology.personalYear}) are especially important.
+
+• Life Path ${numerology.lifePath}: ${numerology.lifePathMeaning || "Summary unavailable."}
+• Personal Year ${numerology.personalYear}: ${
+    numerology.personalYearMeaning || "Year meaning unavailable."
+  }
+
+These patterns describe the bigger cycle you are in, and how it connects to "${question}" in the area of ${intent}.
+`.trim();
+}
+
+function generatePalmistryInterpretation({ question, intent, palmistry }) {
+  if (!palmistry) {
+    return `
+No palm image was detected, so this part of the reading uses general palmistry principles only.
+Even so, your deeper emotional and life-direction patterns still influence your question about ${intent}.
+    `.trim();
+  }
+
+  return `
+Your palm features add another layer to your situation around ${intent}:
+
+Heart Line: ${palmistry?.features?.heartLine || "Not specified"}
+Head Line: ${palmistry?.features?.headLine || "Not specified"}
+Life Line: ${palmistry?.features?.lifeLine || "Not specified"}
+Fate Line: ${palmistry?.features?.fateLine || "Not specified"}
+
+These reflect how you feel, think, sustain energy, and orient your life path, all of which shape the way you experience "${question}".
+`.trim();
+}
+
+function generateCombinedSynthesis({ question, intent, astrology, numerology, palmistry }) {
+  return `
+When we blend these three systems together, the message around "${question}" becomes clearer:
+
+• Astrology shows the energetic and psychological themes you are working through.
+• Numerology reveals the timing and life-cycle stage you are in.
+• Palmistry reflects your deeper emotional wiring and long-term direction.
+
+Combined, they suggest that your path in the area of ${intent} is moving toward greater awareness and choice.
+You are being asked to respond with honesty, self-knowledge, and a willingness to grow.
+`.trim();
+}
+
+function generateTimeline({ intent, astrology, numerology }) {
+  const year = numerology?.personalYear ?? "your current year";
+  const range = numerology?.personalMonthRange || "the upcoming months";
+
+  return `
+In terms of timing, the strongest movement appears during Personal Year ${year}, especially over ${range}.
+Astrologically, supportive transits (such as ${astrology?.transit1 || "a key uplifting aspect"} and ${
+    astrology?.transit2 || "a secondary positive influence"
+  }) can bring clearer events, decisions, or opportunities.
+
+This doesn’t force an outcome, but it does highlight a window where choices around ${intent} can have extra impact.
+`.trim();
+}
+
+function generateRecommendations({ intent }) {
+  return `
+To work constructively with these energies around ${intent}, consider:
+
+1. Getting clear on what you truly want and why.
+2. Releasing patterns that no longer fit who you’re becoming.
+3. Taking one grounded, practical step that reflects your intention.
+4. Giving yourself time to integrate emotional shifts as they arise.
+5. Trusting that you are allowed to move toward situations that feel aligned, honest, and alive for you.
+
+Use this reading as a mirror rather than a rigid prediction; your free will is always the most important factor.
+`.trim();
 }
