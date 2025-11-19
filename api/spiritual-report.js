@@ -12,27 +12,41 @@ import { generatePDF } from "./utils/generate-pdf.js";
 import { sendEmailHTML } from "./utils/send-email.js";
 
 export const config = {
-  api: { bodyParser: false }
+  api: { bodyParser: false },
 };
 
+// ------------------------------------
+// Helpers
+// ------------------------------------
 function allowCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+function normalizeField(fields, key) {
+  const v = fields?.[key];
+  if (Array.isArray(v)) return v[0];
+  return v ?? "";
+}
+
 export default async function handler(req, res) {
   allowCors(res);
 
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST")
+  if (req.method !== "POST") {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
 
   try {
     // -----------------------------------------
     // Parse multipart/form-data
     // -----------------------------------------
-    const form = formidable({ keepExtensions: true, allowEmptyFiles: true });
+    const form = formidable({
+      keepExtensions: true,
+      allowEmptyFiles: true,
+      multiples: false,
+    });
 
     const { fields, files } = await new Promise((resolve, reject) => {
       form.parse(req, (err, f, fi) => {
@@ -41,27 +55,21 @@ export default async function handler(req, res) {
       });
     });
 
-    // -----------------------------------------
-    // Normalize Formidable fields (arrays → strings)
-    // -----------------------------------------
-    function norm(v) {
-      if (Array.isArray(v)) return v[0];
-      return v ?? "";
-    }
+    // Normalize fields (handle arrays from formidable)
+    const rawQuestion = normalizeField(fields, "question");
+    const question = String(rawQuestion || "").trim();
 
-    const question = norm(fields.question);
-    const fullName = norm(fields.fullName);
-    const birthDate = norm(fields.birthDate);
-    const birthTime = norm(fields.birthTime);
-    const birthPlace = norm(fields.birthPlace);
-    const email = norm(fields.email);
-    const isPersonal = norm(fields.isPersonal);
-    const recaptchaToken = norm(fields.recaptchaToken);
+    const fullName = normalizeField(fields, "fullName");
+    const birthDate = normalizeField(fields, "birthDate");
+    const birthTime = normalizeField(fields, "birthTime");
+    const birthPlace = normalizeField(fields, "birthPlace");
+    const email = normalizeField(fields, "email");
+    const rawIsPersonal = normalizeField(fields, "isPersonal");
+    const recaptchaToken =
+      normalizeField(fields, "recaptchaToken") ||
+      normalizeField(fields, "g-recaptcha-response");
 
-    // -----------------------------------------
-    // Validate question
-    // -----------------------------------------
-    if (!question || String(question).trim().length === 0) {
+    if (!question) {
       return res.status(400).json({ ok: false, error: "Question required" });
     }
 
@@ -70,28 +78,49 @@ export default async function handler(req, res) {
     // -----------------------------------------
     const captcha = await verifyRecaptcha(recaptchaToken);
     if (!captcha.ok) {
-      return res.status(403).json({ ok: false, error: "reCAPTCHA failed" });
+      return res
+        .status(403)
+        .json({ ok: false, error: "reCAPTCHA failed", detail: captcha.error });
     }
 
     // -----------------------------------------
-    // Palmistry image (preserve for personal mode)
+    // Palmistry image (optional)
     // -----------------------------------------
-    const palmImagePath = files?.palmImage?.filepath || null;
+    let palmImagePath = null;
+    const palmFile = files?.palmImage;
+
+    if (Array.isArray(palmFile) && palmFile.length > 0) {
+      palmImagePath = palmFile[0]?.filepath || palmFile[0]?.path || null;
+    } else if (palmFile && (palmFile.filepath || palmFile.path)) {
+      palmImagePath = palmFile.filepath || palmFile.path;
+    }
+
     const palmistryData = await analyzePalmImage(palmImagePath);
+
+    // -----------------------------------------
+    // (Optional) technical file – currently ignored but accepted
+    // -----------------------------------------
+    // const techFile = files?.technicalFile;
+    // you can wire this into future upgrades
 
     // -----------------------------------------
     // Intent classification
     // -----------------------------------------
-    const classification = await classifyQuestion(question);
-    const safeIntent = classification?.intent || "general";
+    const classification = await classifyQuestion(question).catch((e) => {
+      console.error("Classifier error:", e);
+      return null;
+    });
 
-    const personalMode =
-      isPersonal === "yes" ||
-      isPersonal === "true" ||
-      isPersonal === true;
+    const safeIntent =
+      classification && classification.intent ? classification.intent : "general";
+
+    const personalMode = (() => {
+      const v = String(rawIsPersonal || "").toLowerCase();
+      return v === "yes" || v === "true" || v === "1" || v === "on";
+    })();
 
     // -----------------------------------------
-    // Unified Insights (PERSONAL + TECHNICAL)
+    // Unified Insights
     // -----------------------------------------
     const insights = await generateInsights({
       question,
@@ -100,52 +129,71 @@ export default async function handler(req, res) {
       birthDate,
       birthTime,
       birthPlace,
-      classify: { ...classification, intent: safeIntent },
+      classify: { ...(classification || {}), intent: safeIntent },
       palmistryData,
-      technicalMode: !personalMode
+      technicalMode: !personalMode,
     });
 
     if (!insights.ok) {
+      console.error("INSIGHTS ERROR:", insights.error);
       return res.status(500).json({
         ok: false,
         error: "Insight generation failed",
-        detail: insights.error
+        detail: insights.error,
       });
     }
 
     // =====================================================
-    // PERSONAL MODE → AUTO SEND FULL PDF
+    // PERSONAL MODE → PDF AUTO EMAIL
     // =====================================================
     if (personalMode) {
-      const pdfBuffer = await generatePDF({
-        mode: "personal",
-        question,
-        fullName,
-        birthDate,
-        birthTime,
-        birthPlace,
-        insights,
-        astrology: insights.astrology,
-        numerology: insights.numerology,
-        palmistry: insights.palmistry
-      });
-
-      const emailResult = await sendEmailHTML({
-        to: email,
-        subject: "Your Personal Spiritual Report",
-        html: `<p>Your personal spiritual report is attached.</p>`,
-        attachments: [
-          { filename: "spiritual-report.pdf", content: pdfBuffer }
-        ]
-      });
-
-      if (!emailResult.success) {
-        console.error("EMAIL ERROR:", emailResult);
+      let pdfBuffer = null;
+      try {
+        pdfBuffer = await generatePDF({
+          mode: "personal",
+          question,
+          fullName,
+          birthDate,
+          birthTime,
+          birthPlace,
+          insights,
+          astrology: insights.astrology,
+          numerology: insights.numerology,
+          palmistry: insights.palmistry,
+        });
+      } catch (err) {
+        console.error("PDF generation error (personal):", err);
         return res.status(500).json({
           ok: false,
-          error: "Email delivery failed",
-          detail: emailResult.error
+          error: "PDF generation failed",
+          detail: err.message,
         });
+      }
+
+      if (email) {
+        const emailResult = await sendEmailHTML({
+          to: email,
+          subject: "Your Personal Spiritual Report",
+          html: `<p>Your personal spiritual report is attached.</p>`,
+          attachments: [
+            {
+              filename: "spiritual-report.pdf",
+              content: pdfBuffer,
+            },
+          ],
+        });
+
+        if (!emailResult.success) {
+          console.error("EMAIL ERROR:", emailResult);
+          // still return short answer, but flag email failure
+          return res.status(500).json({
+            ok: false,
+            error: "Email delivery failed",
+            detail: emailResult.error,
+          });
+        }
+      } else {
+        console.warn("Personal mode but no email provided.");
       }
 
       return res.status(200).json({
@@ -153,12 +201,12 @@ export default async function handler(req, res) {
         mode: "personal",
         shortAnswer: insights.shortAnswer,
         intent: safeIntent,
-        pdfEmailed: true
+        pdfEmailed: !!email,
       });
     }
 
     // =====================================================
-    // TECHNICAL MODE → Return short summary only
+    // TECHNICAL MODE → Return short summary & data
     // =====================================================
     return res.status(200).json({
       ok: true,
@@ -168,14 +216,13 @@ export default async function handler(req, res) {
       explanation: insights.explanation,
       recommendations: insights.recommendations,
       pdfEmailed: false,
-      intent: safeIntent
+      intent: safeIntent,
     });
-
   } catch (err) {
     console.error("SERVER ERROR:", err);
     return res.status(500).json({
       ok: false,
-      error: err.message || "Server failure"
+      error: err.message || "Server failure",
     });
   }
 }
