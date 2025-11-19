@@ -3,7 +3,7 @@
 
 import { generateInsights } from "./utils/generate-insights.js";
 import { generatePDF } from "./utils/generate-pdf.js";
-import { sendEmailHTML } from "./utils/email.js";
+import { sendEmailHTML } from "./utils/send-email.js";
 import { validateUploadedFile } from "./utils/file-validators.js";
 import formidable from "formidable";
 import fs from "fs";
