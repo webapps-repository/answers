@@ -10,7 +10,7 @@ import { classifyQuestion } from "./utils/classify-question.js";
 import { analyzePalmImage } from "./utils/analyze-palm.js";
 import { generateInsights } from "./utils/generate-insights.js";
 import { generatePDF } from "./utils/generate-pdf.js";
-import { sendEmailHTML } from "./utils/email.js";
+import { sendEmailHTML } from "./utils/send-email.js";
 import { validateUploadedFile } from "./utils/file-validators.js";
 
 export const config = {
