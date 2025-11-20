@@ -1,154 +1,124 @@
-// /api/detailed-report.js
-// Generates a full TECHNICAL PDF and emails it on demand.
-
+// /pages/api/detailed-report.js
 import formidable from "formidable";
 import fs from "fs";
+import { validateUploadedFile, verifyRecaptcha, sendEmailHTML } from "../../lib/utils";
+import { generateInsights, generateTechnicalReportHTML } from "../../lib/insights";
+import { generatePDFBufferFromHTML } from "../../lib/pdf";
 
-// NEW IMPORT PATHS (from /lib)
-import { generateInsights } from "../lib/insights.js";
-import { generatePDF } from "../lib/pdf.js";
-import { verifyRecaptcha, sendEmailHTML, validateUploadedFile } from "../lib/utils.js";
-
-export const config = { api: { bodyParser: false } };
-
-// ------------------------------------------------------
-function allowCors(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-}
-// ------------------------------------------------------
+export const config = {
+  api: {
+    bodyParser: false
+  }
+};
 
 export default async function handler(req, res) {
-  allowCors(res);
-
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST")
-    return res.status(405).json({ ok: false, error: "Method not allowed" });
+  if (req.method !== "POST") {
+    res.setHeader("Allow", ["POST"]);
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
   try {
-    let email = "";
-    let question = "";
-    let techFilePath = null;
+    const { fields, files } = await parseForm(req);
 
-    const contentType = req.headers["content-type"] || "";
+    const email = fields.email?.[0] || fields.email;
+    const name = fields.name?.[0] || fields.name;
+    const question = fields.question?.[0] || fields.question;
+    const recaptchaToken = fields.recaptchaToken?.[0] || fields.recaptchaToken;
 
-    // =====================================================
-    // MULTIPART (FormData)
-    // =====================================================
-    if (contentType.includes("multipart/form-data")) {
-      const form = formidable({
-        keepExtensions: true,
-        allowEmptyFiles: true,
-        multiples: false,
-      });
+    // 1) Validate reCAPTCHA
+    const recaptcha = await verifyRecaptcha(recaptchaToken, req.headers["x-forwarded-for"]);
+    if (!recaptcha.ok) {
+      return res.status(400).json({ error: "reCAPTCHA failed", details: recaptcha });
+    }
 
-      const { fields, files } = await new Promise((resolve, reject) => {
-        form.parse(req, (err, f, fi) => {
-          if (err) reject(err);
-          else resolve({ fields: f, files: fi });
-        });
-      });
+    // 2) Validate uploaded file (if any)
+    const uploadedFile = files?.upload || files?.file;
+    let uploadedFileBuffer = null;
 
-      question = String(fields.question || "").trim();
-      email = String(fields.email || "").trim();
-
-      // Technical file (optional)
-      if (files?.techFile?.filepath && fs.existsSync(files.techFile.filepath)) {
-        const safe = validateUploadedFile(files.techFile);
-        if (!safe.ok) {
-          fs.unlinkSync(files.techFile.filepath);
-          return res.status(400).json({ ok: false, error: safe.error });
-        }
-        techFilePath = files.techFile.filepath;
+    if (uploadedFile) {
+      const val = validateUploadedFile(uploadedFile);
+      if (!val.ok) {
+        return res.status(400).json({ error: val.error });
       }
+
+      const filepath = uploadedFile.filepath || uploadedFile.path;
+      uploadedFileBuffer = fs.readFileSync(filepath);
     }
 
-    // =====================================================
-    // JSON BODY (from modal)
-    // =====================================================
-    else {
-      const body = await new Promise((resolve) => {
-        let data = "";
-        req.on("data", (c) => (data += c));
-        req.on("end", () => resolve(JSON.parse(data || "{}")));
-      });
+    // 3) Build engines input (adapt to your actual frontend form fields)
+    const enginesInput = {
+      palm: uploadedFileBuffer
+        ? { imageDescription: "User palm image", handMeta: { fromFile: true } }
+        : null,
+      numerology: {
+        fullName: fields.fullName?.[0] || fields.fullName || name,
+        dateOfBirth: fields.dateOfBirth?.[0] || fields.dateOfBirth
+      },
+      astrology: {
+        birthDate: fields.birthDate?.[0] || fields.birthDate || fields.dateOfBirth,
+        birthTime: fields.birthTime?.[0] || fields.birthTime,
+        birthLocation: fields.birthLocation?.[0] || fields.birthLocation
+      }
+    };
 
-      question = String(body.question || "").trim();
-      email = String(body.email || "").trim();
-    }
-
-    // =====================================================
-    // VALIDATION
-    // =====================================================
-    if (!question) return res.status(400).json({ ok: false, error: "Question required" });
-    if (!email) return res.status(400).json({ ok: false, error: "Email required" });
-
-    // =====================================================
-    // GENERATE TECHNICAL INSIGHTS
-    // =====================================================
+    // 4) Generate insights (all engines)
     const insights = await generateInsights({
       question,
-      isPersonal: false,
-      classify: { type: "technical", intent: "technical" },
-      palmistryData: null,
-      technicalMode: true,
-      techFilePath
+      meta: { email, name },
+      enginesInput
     });
 
-    // Delete uploaded technical file (per user rules)
-    if (techFilePath && fs.existsSync(techFilePath))
-      fs.unlinkSync(techFilePath);
+    // 5) Generate technical HTML
+    const html = generateTechnicalReportHTML(insights);
 
-    if (!insights.ok) {
-      return res.status(500).json({
-        ok: false,
-        error: "Insight generation failed",
-        detail: insights.error,
+    // 6) Generate PDF
+    const pdfBuffer = await generatePDFBufferFromHTML(html);
+
+    // 7) Email PDF to user (if email provided)
+    if (email) {
+      await sendEmailHTML({
+        to: email,
+        subject: "Your Technical Spiritual Report",
+        html: `
+          <p>Hi ${name || ""},</p>
+          <p>Your technical PDF report is attached.</p>
+          <p>Love,<br/>Your Friendly Robot</p>
+        `,
+        attachments: [
+          {
+            content: pdfBuffer.toString("base64"),
+            filename: "technical-report.pdf",
+            type: "application/pdf",
+            disposition: "attachment"
+          }
+        ]
       });
     }
 
-    // =====================================================
-    // GENERATE PDF
-    // =====================================================
-    const pdfBuffer = await generatePDF({
-      mode: "technical",
-      question,
-      insights,
-    });
-
-    // =====================================================
-    // SEND EMAIL
-    // =====================================================
-    const emailResult = await sendEmailHTML({
-      to: email,
-      subject: "Your Detailed Technical Report",
-      html: `<p>Your detailed technical report is attached.</p>`,
-      attachments: [
-        { filename: "technical-report.pdf", content: pdfBuffer }
-      ],
-    });
-
-    if (!emailResult.success) {
-      return res.status(500).json({
-        ok: false,
-        error: "Email failed",
-        detail: emailResult.error,
-      });
-    }
-
+    // 8) Respond to frontend
     return res.status(200).json({
       ok: true,
-      pdfEmailed: true,
-      emailStatus: "sent",
-      sentAt: new Date().toISOString(),
+      emailed: Boolean(email),
+      meta: { email, name },
+      debug: { recaptcha }
     });
-
   } catch (err) {
-    console.error("DETAILED REPORT ERROR:", err);
-    return res.status(500).json({
-      ok: false,
-      error: err.message || "Server failure",
-    });
+    console.error("detailed-report API error:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
+}
+
+function parseForm(req) {
+  const form = formidable({
+    keepExtensions: true,
+    multiples: false,
+    maxFileSize: 10 * 1024 * 1024
+  });
+
+  return new Promise((resolve, reject) => {
+    form.parse(req, (err, fields, files) => {
+      if (err) return reject(err);
+      resolve({ fields, files });
+    });
+  });
 }
