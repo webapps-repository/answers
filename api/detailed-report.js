@@ -29,8 +29,8 @@ export default async function handler(req, res) {
     const question = fields.question?.[0] || fields.question || "";
 
     const recaptchaToken =
-      fields.recaptchaToken?.[0] || fields.recaptchaToken ||
-      fields["g-recaptcha-response"];
+      normalize(fields, "recaptchaToken") ||
+      normalize(fields, "g-recaptcha-response");
 
     // Validate recaptcha
     const recaptcha = await verifyRecaptcha(recaptchaToken);
