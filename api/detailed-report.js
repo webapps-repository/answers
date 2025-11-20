@@ -1,109 +1,89 @@
 // /api/detailed-report.js
 import formidable from "formidable";
 import fs from "fs";
-import { validateUploadedFile, verifyRecaptcha, sendEmailHTML } from "../lib/utils.js";
-import { generateInsights, generateTechnicalReportHTML } from "../lib/insights.js";
+
+import { applyCORS, validateUploadedFile, verifyRecaptcha, sendEmailHTML } from "../lib/utils.js";
+import { generateInsights } from "../lib/insights.js";
 import { generatePDFBufferFromHTML } from "../lib/pdf.js";
 
 export const config = { api: { bodyParser: false } };
 
-// Unified CORS
-function applyCORS(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") {
-    res.status(200).end();
-    return true;
-  }
-  return false;
+function parseForm(req) {
+  const form = formidable({ keepExtensions: true, maxFileSize: 10 * 1024 * 1024 });
+  return new Promise((resolve, reject) =>
+    form.parse(req, (err, f, files) => err ? reject(err) : resolve({ fields: f, files }))
+  );
 }
 
 export default async function handler(req, res) {
   if (applyCORS(req, res)) return;
 
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ error: "Method Not Allowed" });
-  }
 
   try {
     const { fields, files } = await parseForm(req);
 
-    const email       = fields.email?.[0]      || fields.email;
-    const name        = fields.name?.[0]       || fields.name;
-    const question    = fields.question?.[0]   || fields.question;
-    const recaptcha   = fields.recaptchaToken?.[0] || fields.recaptchaToken;
+    const email = fields.email?.[0] || fields.email || "";
+    const name = fields.name?.[0] || fields.name || "";
+    const question = fields.question?.[0] || fields.question || "";
 
-    // Validate reCAPTCHA
-    const recap = await verifyRecaptcha(recaptcha, req.headers["x-forwarded-for"]);
-    if (!recap.ok) {
-      return res.status(403).json({ error: "reCAPTCHA failed", details: recap });
-    }
+    const recaptchaToken =
+      fields.recaptchaToken?.[0] || fields.recaptchaToken ||
+      fields["g-recaptcha-response"];
 
-    // Handle uploaded file
+    // Validate recaptcha
+    const recaptcha = await verifyRecaptcha(recaptchaToken);
+    if (!recaptcha.ok)
+      return res.status(400).json({ error: "Invalid reCAPTCHA" });
+
     let uploadedFileBuffer = null;
-    const uploadedFile = files?.upload || files?.file;
-
-    if (uploadedFile) {
-      const val = validateUploadedFile(uploadedFile);
-      if (!val.ok) return res.status(400).json({ error: val.error });
-
-      uploadedFileBuffer = fs.readFileSync(uploadedFile.filepath || uploadedFile.path);
+    const uploaded = files.upload || files.file;
+    if (uploaded) {
+      const safe = validateUploadedFile(uploaded);
+      if (!safe.ok) return res.status(400).json({ error: safe.error });
+      uploadedFileBuffer = fs.readFileSync(uploaded.filepath);
     }
 
     // Build engines input
     const enginesInput = {
-      palm: uploadedFileBuffer ? { buffer: uploadedFileBuffer } : null,
+      palm: uploadedFileBuffer ? { imageDescription: "Palm image", handMeta: {} } : null,
       numerology: {
-        fullName: fields.fullName?.[0] || fields.fullName || name,
-        dateOfBirth: fields.dateOfBirth?.[0] || fields.dateOfBirth
+        fullName: name,
+        dateOfBirth: fields.dateOfBirth
       },
       astrology: {
-        birthDate: fields.birthDate?.[0] || fields.birthDate,
-        birthTime: fields.birthTime?.[0] || fields.birthTime,
-        birthLocation: fields.birthLocation?.[0] || fields.birthLocation
+        birthDate: fields.birthDate,
+        birthTime: fields.birthTime,
+        birthLocation: fields.birthLocation
       }
     };
 
-    // Generate insights
     const insights = await generateInsights({ question, meta: { email, name }, enginesInput });
 
-    // Generate HTML
-    const html = generateTechnicalReportHTML(insights);
+    const html = `
+      <h1>Technical Spiritual Report</h1>
+      <p>Name: ${name}</p>
+      <p>Email: ${email}</p>
+      <pre>${JSON.stringify(insights, null, 2)}</pre>
+    `;
 
-    // Generate PDF
     const pdfBuffer = await generatePDFBufferFromHTML(html);
 
-    // Email report
     if (email) {
       await sendEmailHTML({
         to: email,
-        subject: "Your Technical Spiritual Report",
-        html: `<p>Hi ${name || ""}, your PDF report is attached.</p>`,
+        subject: "Your Technical Report",
+        html: `<p>Your report is attached.</p>`,
         attachments: [
-          {
-            filename: "technical-report.pdf",
-            content: pdfBuffer.toString("base64"),
-            type: "application/pdf"
-          }
+          { filename: "report.pdf", content: pdfBuffer }
         ]
       });
     }
 
-    return res.status(200).json({ ok: true, emailed: !!email });
+    return res.status(200).json({ ok: true });
   } catch (err) {
-    console.error("Detailed report error:", err);
-    return res.status(500).json({ error: "Internal Server Error" });
+    console.error("Detailed report API error:", err);
+    return res.status(500).json({ error: "Server error" });
   }
-}
-
-function parseForm(req) {
-  const form = formidable({
-    keepExtensions: true,
-    maxFileSize: 10 * 1024 * 1024
-  });
-
-  return new Promise((resolve, reject) => {
-    form.parse(req, (err, fields, files) => (err ? reject(err) : resolve({ fields, files })));
-  });
 }
