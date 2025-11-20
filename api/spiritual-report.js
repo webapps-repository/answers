@@ -5,12 +5,7 @@ import formidable from "formidable";
 import fs from "fs";
 
 // NEW IMPORT PATHS (lib instead of utils)
-import {
-  verifyRecaptcha,
-  sendEmailHTML,
-  validateUploadedFile
-} from "../lib/utils.js";
-
+import { verifyRecaptcha, sendEmailHTML, validateUploadedFile } from "../lib/utils.js";
 import { classifyQuestion } from "../lib/ai.js";
 import { analyzePalmImage } from "../lib/engines.js";
 import { generateInsights } from "../lib/insights.js";
