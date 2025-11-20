@@ -1,9 +1,9 @@
 // /pages/api/detailed-report.js
 import formidable from "formidable";
 import fs from "fs";
-import { validateUploadedFile, verifyRecaptcha, sendEmailHTML } from "../lib/utils";
-import { generateInsights, generateTechnicalReportHTML } from "../lib/insights";
-import { generatePDFBufferFromHTML } from "../lib/pdf";
+import { validateUploadedFile, verifyRecaptcha, sendEmailHTML } from "../lib/utils.js";
+import { generateInsights, generateTechnicalReportHTML } from "../lib/insights.js";
+import { generatePDFBufferFromHTML } from "../lib/pdf.js";
 
 export const config = {
   api: {
@@ -25,27 +25,24 @@ export default async function handler(req, res) {
     const question = fields.question?.[0] || fields.question;
     const recaptchaToken = fields.recaptchaToken?.[0] || fields.recaptchaToken;
 
-    // 1) Validate reCAPTCHA
+    // 1) reCAPTCHA
     const recaptcha = await verifyRecaptcha(recaptchaToken, req.headers["x-forwarded-for"]);
     if (!recaptcha.ok) {
       return res.status(400).json({ error: "reCAPTCHA failed", details: recaptcha });
     }
 
-    // 2) Validate uploaded file (if any)
+    // 2) Uploaded file (optional)
     const uploadedFile = files?.upload || files?.file;
     let uploadedFileBuffer = null;
 
     if (uploadedFile) {
       const val = validateUploadedFile(uploadedFile);
-      if (!val.ok) {
-        return res.status(400).json({ error: val.error });
-      }
-
+      if (!val.ok) return res.status(400).json({ error: val.error });
       const filepath = uploadedFile.filepath || uploadedFile.path;
       uploadedFileBuffer = fs.readFileSync(filepath);
     }
 
-    // 3) Build engines input (adapt to your actual frontend form fields)
+    // 3) Engines input
     const enginesInput = {
       palm: uploadedFileBuffer
         ? { imageDescription: "User palm image", handMeta: { fromFile: true } }
@@ -61,20 +58,18 @@ export default async function handler(req, res) {
       }
     };
 
-    // 4) Generate insights (all engines)
+    // 4) Insights
     const insights = await generateInsights({
       question,
       meta: { email, name },
       enginesInput
     });
 
-    // 5) Generate technical HTML
+    // 5) HTML → PDF
     const html = generateTechnicalReportHTML(insights);
-
-    // 6) Generate PDF
     const pdfBuffer = await generatePDFBufferFromHTML(html);
 
-    // 7) Email PDF to user (if email provided)
+    // 6) Email
     if (email) {
       await sendEmailHTML({
         to: email,
@@ -82,26 +77,25 @@ export default async function handler(req, res) {
         html: `
           <p>Hi ${name || ""},</p>
           <p>Your technical PDF report is attached.</p>
-          <p>Love,<br/>Your Friendly Robot</p>
         `,
         attachments: [
           {
-            content: pdfBuffer.toString("base64"),
             filename: "technical-report.pdf",
             type: "application/pdf",
-            disposition: "attachment"
+            content: pdfBuffer.toString("base64")
           }
         ]
       });
     }
 
-    // 8) Respond to frontend
+    // 7) Response
     return res.status(200).json({
       ok: true,
       emailed: Boolean(email),
       meta: { email, name },
       debug: { recaptcha }
     });
+
   } catch (err) {
     console.error("detailed-report API error:", err);
     return res.status(500).json({ error: "Internal server error" });
@@ -117,8 +111,8 @@ function parseForm(req) {
 
   return new Promise((resolve, reject) => {
     form.parse(req, (err, fields, files) => {
-      if (err) return reject(err);
-      resolve({ fields, files });
+      if (err) reject(err);
+      else resolve({ fields, files });
     });
   });
 }
