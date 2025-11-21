@@ -1,3 +1,0 @@
-# Frontend
-
-Shopify integration details.
