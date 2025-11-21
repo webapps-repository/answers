@@ -1,3 +1,0 @@
-# Project Documentation
-
-Comprehensive documentation...
