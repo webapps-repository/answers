@@ -1,3 +1,4 @@
 # Frontend Guide
 
-Shopify + JS integration.
+## Shopify Integration
+Details...

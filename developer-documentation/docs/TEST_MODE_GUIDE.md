@@ -1,3 +1,4 @@
 # Test Mode Guide
 
-Zero-cost testing flags.
+## Flags
+Details...

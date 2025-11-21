@@ -1,3 +1,4 @@
 # Architecture
 
-System architecture diagrams and descriptions.
+## System Architecture
+Diagrams and detailed explanations...

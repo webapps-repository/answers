@@ -1,3 +1,4 @@
 # Email System
 
-Resend email architecture.
+## Resend Integration
+Details...

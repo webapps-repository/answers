@@ -1,3 +1,4 @@
 # Deployment Guide
 
-How to deploy to Vercel.
+## Vercel Deployment Steps
+Details...

@@ -1,3 +1,6 @@
 # API Reference
 
-Endpoints and payloads.
+## Endpoints
+- /api/spiritual-report
+- /api/detailed-report
+...

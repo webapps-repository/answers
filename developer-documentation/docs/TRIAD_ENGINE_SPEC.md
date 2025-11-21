@@ -1,3 +1,8 @@
 # Triad Engine Specification
 
-Palmistry, Astrology, Numerology.
+## Palmistry Engine
+Details...
+## Astrology Engine
+Details...
+## Numerology Engine
+Details...
