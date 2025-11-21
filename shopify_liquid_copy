@@ -36,6 +36,16 @@
 
     .spinner {display:none; text-align:center; margin-top:10px; color:#444;}
 
+    #status-text {
+      margin-top:8px;
+      font-size:0.9rem;
+      color:#555;
+      min-height:1em;
+    }
+
+    #progress { width:100%; height:8px; background:#eee; border-radius:6px; overflow:hidden; margin-top:10px; }
+    #progress-inner { width:0%; height:100%; background:#6c63ff; transition:width .25s linear;}
+
     #modal-bg {
       position:fixed; inset:0; background:rgba(0,0,0,0.45);
       display:none; justify-content:center; align-items:center; z-index:999999;
@@ -47,9 +57,6 @@
     .modal-btn { padding:12px; margin-top:10px; width:100%; border:none; border-radius:8px; font-weight:600;}
     .modal-send { background:#4caf50; color:white; }
     .modal-cancel { background:#ddd; color:black; }
-
-    #progress { width:100%; height:8px; background:#eee; border-radius:6px; overflow:hidden; margin-top:10px; }
-    #progress-inner { width:0%; height:100%; background:#6c63ff; transition:width .3s linear;}
   </style>
 </head>
 <body>
@@ -57,7 +64,7 @@
 <div id="wrapper">
   <h2>Your Question</h2>
 
-  <form id="main-form" enctype="multipart/form-data" autocomplete="off">
+  <form id="main-form" enctype="multipart/form-data">
     <div class="field" style="display:flex; align-items:center; gap:8px;">
       <input type="checkbox" id="isPersonal" style="width:20px;height:20px;">
       <label for="isPersonal" style="margin:0;">This is a personal question</label>
@@ -65,7 +72,13 @@
 
     <div class="field">
       <label>Your Question</label>
-      <textarea id="question" name="question" maxlength="200" required></textarea>
+      <textarea id="question" name="question" maxlength="200"></textarea>
+    </div>
+
+    <!-- Technical upload -->
+    <div class="field" id="technical-field">
+      <label>Optional file upload (for diagrams, screenshots, etc.)</label>
+      <input id="technicalFile" name="technicalFile" type="file">
     </div>
 
     <div id="personal-fields">
@@ -73,10 +86,15 @@
       <div class="field"><label>Full Name</label><input id="fullName" name="fullName"></div>
       <div class="field"><label>Date of Birth</label><input id="birthDate" name="birthDate" type="date"></div>
       <div class="field"><label>Time of Birth</label><input id="birthTime" name="birthTime" type="time"></div>
-      <div class="field"><label>City</label><input id="birthCity"></div>
-      <div class="field"><label>State</label><input id="birthState"></div>
-      <div class="field"><label>Country</label><input id="birthCountry"></div>
-      <div class="field"><label>Palm</label><input name="palmImage" type="file" accept="image/*"></div>
+
+      <div class="field"><label>City</label><input id="birthCity" name="birthCity"></div>
+      <div class="field"><label>State</label><input id="birthState" name="birthState"></div>
+      <div class="field"><label>Country</label><input id="birthCountry" name="birthCountry"></div>
+
+      <div class="field">
+        <label>Upload a clear photo of your right palm (optional)</label>
+        <input name="palmImage" type="file" accept="image/*">
+      </div>
     </div>
 
     <div class="field">
@@ -84,8 +102,10 @@
     </div>
 
     <button id="get-btn" type="submit" class="btn">Get Answer</button>
+
     <div id="progress"><div id="progress-inner"></div></div>
     <div class="spinner" id="spinner">Processing...</div>
+    <div id="status-text"></div>
   </form>
 
   <div id="summary" style="display:none;">
@@ -95,6 +115,7 @@
   </div>
 </div>
 
+<!-- modal -->
 <div id="modal-bg">
   <div id="modal">
     <h3>Enter your email</h3>
@@ -107,10 +128,29 @@
 <script src="https://www.google.com/recaptcha/api.js?onload=onLoadRecaptcha&render=explicit" async defer></script>
 
 <script>
+/* ============================================================
+   API ENDPOINTS
+============================================================ */
 const API_SUMMARY = "https://answers-rust.vercel.app/api/spiritual-report";
-const API_PDF = "https://answers-rust.vercel.app/api/detailed-report";
+const API_PDF     = "https://answers-rust.vercel.app/api/detailed-report";
+
+/* ============================================================
+   DOM refs
+============================================================ */
+const personalBox       = document.getElementById("isPersonal");
+const personalFields    = document.getElementById("personal-fields");
+const technicalField    = document.getElementById("technical-field");
+const technicalFileInput= document.getElementById("technicalFile");
+const questionEl        = document.getElementById("question");
+const summaryEl         = document.getElementById("summary");
+const summaryTextEl     = document.getElementById("summary-text");
+const spinner           = document.getElementById("spinner");
+const statusText        = document.getElementById("status-text");
+const pdfBtn            = document.getElementById("pdf-btn");
+const progressInner     = document.getElementById("progress-inner");
 
 let recaptchaId = null;
+let lastMode = null;
 
 /* ============================================================
    RECAPTCHA
@@ -122,109 +162,197 @@ function onLoadRecaptcha() {
   });
 }
 
-const personalBox = document.getElementById("isPersonal");
-const personalFields = document.getElementById("personal-fields");
+/* ============================================================
+   Reset UI
+============================================================ */
+function resetSummary() {
+  summaryTextEl.textContent = "";
+  summaryEl.style.display = "none";
+  statusText.textContent = "";
+}
 
+questionEl.addEventListener("input", resetSummary);
+
+/* ============================================================
+   PERSONAL MODE SWITCH
+============================================================ */
 personalBox.addEventListener("change", () => {
-  personalFields.style.display = personalBox.checked ? "block" : "none";
+  if (personalBox.checked) {
+    personalFields.style.display = "block";
+    technicalField.style.display = "none";
+    pdfBtn.style.display = "none";
+  } else {
+    personalFields.style.display = "none";
+    technicalField.style.display = "block";
+    pdfBtn.style.display = "none";
+  }
+  resetSummary();
 });
 
-const progressInner = document.getElementById("progress-inner");
+/* ============================================================
+   PROGRESS BAR
+============================================================ */
 function animateProgress() {
   progressInner.style.width = "0%";
-  setTimeout(() => progressInner.style.width = "40%", 200);
-  setTimeout(() => progressInner.style.width = "70%", 700);
-  setTimeout(() => progressInner.style.width = "100%", 1400);
+  setTimeout(() => progressInner.style.width = "40%", 100);
+  setTimeout(() => progressInner.style.width = "75%", 600);
+  setTimeout(() => progressInner.style.width = "100%", 1300);
 }
 
 /* ============================================================
-   SUBMIT FORM → CALL SPIRITUAL-REPORT
+   SUBMIT → GET SUMMARY ANSWER
 ============================================================ */
 document.getElementById("main-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  resetSummary();
 
   const token = grecaptcha.getResponse(recaptchaId);
-  if (!token) return alert("Please complete reCAPTCHA.");
+  if (!token) {
+    alert("Please complete reCAPTCHA.");
+    return;
+  }
 
+  spinner.style.display = "block";
+  statusText.textContent = "Processing...";
   animateProgress();
 
   const fd = new FormData();
-
-  // ALWAYS send strings (fixes .trim() undefined)
-  fd.append("question", String(document.getElementById("question").value || ""));
-  fd.append("isPersonal", personalBox.checked ? "true" : "false");
+  fd.append("question", questionEl.value.trim());
   fd.append("recaptchaToken", token);
+  fd.append("isPersonal", personalBox.checked ? "true" : "false");
 
-  if (personalBox.checked) {
-    fd.append("email", String(document.getElementById("email").value || ""));
-    fd.append("fullName", String(document.getElementById("fullName").value || ""));
-    fd.append("birthDate", String(document.getElementById("birthDate").value || ""));
-    fd.append("birthTime", String(document.getElementById("birthTime").value || ""));
-    fd.append(
-      "birthPlace",
-      [
-        String(document.getElementById("birthCity").value || ""),
-        String(document.getElementById("birthState").value || ""),
-        String(document.getElementById("birthCountry").value || "")
-      ].join(", ")
-    );
-
-    const palm = document.querySelector('input[name="palmImage"]').files[0];
-    if (palm) fd.append("palmImage", palm);
+  if (!personalBox.checked && technicalFileInput?.files[0]) {
+    fd.append("technicalFile", technicalFileInput.files[0]);
   }
 
-  const raw = await fetch(API_SUMMARY, { method:"POST", body:fd });
-  const json = await raw.json();
+  if (personalBox.checked) {
+    fd.append("email", document.getElementById("email").value.trim());
+    fd.append("fullName", document.getElementById("fullName").value.trim());
+    fd.append("birthDate", document.getElementById("birthDate").value);
+    fd.append("birthTime", document.getElementById("birthTime").value);
 
-  document.getElementById("summary-text").textContent =
-    json.shortAnswer || "(no answer returned)";
+    const place = [
+      document.getElementById("birthCity").value.trim(),
+      document.getElementById("birthState").value.trim(),
+      document.getElementById("birthCountry").value.trim()
+    ].filter(Boolean).join(", ");
 
-  document.getElementById("summary").style.display = "block";
+    fd.append("birthPlace", place);
 
-  document.getElementById("pdf-btn").style.display =
-    json.pdfEmailed ? "none" : "block";
+    const palmFile = document.querySelector('input[name="palmImage"]').files[0];
+    if (palmFile) fd.append("palmImage", palmFile);
+  }
 
+  let json;
+  try {
+    const raw = await fetch(API_SUMMARY, {
+      method: "POST",
+      mode: "cors",
+      body: fd
+    });
+
+    json = await raw.json();
+  } catch (err) {
+    spinner.style.display = "none";
+    alert("Server error: " + err.message);
+    return;
+  }
+
+  spinner.style.display = "none";
+
+  if (json.error) {
+    alert("Error: " + json.error);
+    return;
+  }
+
+  lastMode = personalBox.checked ? "personal" : "technical";
+
+  summaryTextEl.textContent = json.shortAnswer || "(no answer returned)";
+  summaryEl.style.display = "block";
+
+  if (lastMode === "personal") {
+    pdfBtn.style.display = "none";
+    statusText.textContent = "Your full personal report has been emailed.";
+    alert("✔ Your personal report has been emailed.");
+  } else {
+    pdfBtn.style.display = "block";
+    statusText.textContent = "Short answer ready. Click below for full PDF.";
+  }
+
+  // reset CAPTCHA ONLY AFTER processing
   grecaptcha.reset(recaptchaId);
 });
 
 /* ============================================================
-   PDF BUTTON → EMAIL MODAL (TECHNICAL MODE)
+   PDF SEND (TECHNICAL ONLY)
 ============================================================ */
-const modal = document.getElementById("modal-bg");
+const modalBg = document.getElementById("modal-bg");
 
-document.getElementById("pdf-btn").addEventListener("click", () => {
-  const email = document.getElementById("email").value.trim();
-  if (personalBox.checked && email) {
-    alert("Your full personal report has already been emailed.");
+pdfBtn.addEventListener("click", () => {
+  if (lastMode === "personal") {
+    alert("Your personal full report was already emailed.");
     return;
   }
-  modal.style.display = "flex";
+
+  const savedEmail = document.getElementById("email").value.trim();
+  if (savedEmail) sendTechnicalPdf(savedEmail);
+  else modalBg.style.display = "flex";
 });
 
 document.getElementById("modal-cancel").addEventListener("click", () => {
-  modal.style.display = "none";
+  modalBg.style.display = "none";
 });
 
-document.getElementById("modal-send").addEventListener("click", async () => {
+document.getElementById("modal-send").addEventListener("click", () => {
   const email = document.getElementById("modal-email").value.trim();
-  if (!email) return alert("Enter an email.");
-  modal.style.display = "none";
+  if (!email) return alert("Enter your email");
+  modalBg.style.display = "none";
+  sendTechnicalPdf(email);
+});
+
+/* ============================================================
+   TECHNICAL PDF SEND
+============================================================ */
+async function sendTechnicalPdf(email) {
+  const token = grecaptcha.getResponse(recaptchaId);
+  if (!token) {
+    alert("Captcha expired. Please complete again.");
+    grecaptcha.reset(recaptchaId);
+    return;
+  }
 
   const body = JSON.stringify({
     email,
-    question: document.getElementById("question").value
+    question: questionEl.value.trim(),
+    recaptchaToken: token
   });
 
-  const raw = await fetch(API_PDF, {
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body
-  });
+  statusText.textContent = "Sending PDF to " + email + "...";
 
-  const json = await raw.json();
-  if (!json.ok) alert("Email failed: " + json.error);
-  else alert("Detailed report emailed!");
-});
+  try {
+    const raw = await fetch(API_PDF, {
+      method: "POST",
+      mode: "cors",
+      headers: { "Content-Type": "application/json" },
+      body
+    });
+
+    const json = await raw.json();
+
+    if (!json.ok) {
+      alert("Failed: " + (json.error || "Unknown error"));
+      return;
+    }
+
+    alert("✔ Detailed technical report emailed!");
+    statusText.textContent = "Report sent successfully.";
+
+  } catch (err) {
+    alert("Server error: " + err.message);
+  }
+
+  grecaptcha.reset(recaptchaId);
+}
 </script>
 
 </body>
