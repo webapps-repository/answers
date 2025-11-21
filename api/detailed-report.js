@@ -1,4 +1,9 @@
 // /api/detailed-report.js — FINAL DEPLOY PATCH
+// /api/detailed-report.js — FINAL DEPLOY PATCH
+// /api/detailed-report.js — FINAL DEPLOY PATCH
+// /api/detailed-report.js — FINAL DEPLOY PATCH
+// /api/detailed-report.js — FINAL DEPLOY PATCH
+
 export const config = {
   api: { bodyParser: false },
   runtime: "nodejs"
