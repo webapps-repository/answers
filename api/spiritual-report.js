@@ -1,4 +1,4 @@
-// /api/spiritual-report.js — FINAL DEPLOY PATCH
+// /api/spiritual-report.js — FINAL RESTORED & PATCHED
 export const config = {
   api: { bodyParser: false },
   runtime: "nodejs"
@@ -25,48 +25,77 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method Not Allowed" });
 
   try {
+    /* ----------------------------------------------------------
+       1) Parse multipart form
+    ---------------------------------------------------------- */
     const form = formidable({ keepExtensions: true });
     const { fields, files } = await new Promise((resolve, reject) =>
-      form.parse(req, (err, f, fi) => err ? reject(err) : resolve({ fields: f, files: fi }))
+      form.parse(req, (err, f, fi) =>
+        err ? reject(err) : resolve({ fields: f, files: fi })
+      )
     );
 
+    /* ----------------------------------------------------------
+       2) Required fields
+    ---------------------------------------------------------- */
     const question = normalize(fields, "question");
-    if (!question) return res.status(400).json({ error: "Missing question" });
+    if (!question)
+      return res.status(400).json({ error: "Missing question" });
 
     const recaptchaToken = normalize(fields, "recaptchaToken");
     const captcha = await verifyRecaptcha(recaptchaToken);
-    if (!captcha.ok) return res.status(400).json({ error: "Invalid reCAPTCHA" });
+    if (!captcha.ok)
+      return res.status(400).json({ error: "Invalid reCAPTCHA" });
 
     const isPersonal = normalize(fields, "isPersonal") === "true";
     const email = normalize(fields, "email");
 
+    /* ----------------------------------------------------------
+       3) Palmistry Input
+    ---------------------------------------------------------- */
     let palm = null;
     if (files.palmImage?.filepath) {
+      const safe = validateUploadedFile(files.palmImage);
+      if (!safe.ok)
+        return res.status(400).json({ error: safe.error });
+
       palm = await analyzePalm({
         imageDescription: "Palm Image",
         handMeta: {}
       });
     }
 
+    /* ----------------------------------------------------------
+       4) Full engines input for Stage 2
+    ---------------------------------------------------------- */
     const enginesInput = {
       palm,
-      numerology: isPersonal ? {
-        fullName: normalize(fields, "fullName"),
-        dateOfBirth: normalize(fields, "birthDate")
-      } : null,
-      astrology: isPersonal ? {
-        birthDate: normalize(fields, "birthDate"),
-        birthTime: normalize(fields, "birthTime"),
-        birthLocation: normalize(fields, "birthPlace")
-      } : null
+      numerology: isPersonal
+        ? {
+            fullName: normalize(fields, "fullName"),
+            dateOfBirth: normalize(fields, "birthDate")
+          }
+        : null,
+      astrology: isPersonal
+        ? {
+            birthDate: normalize(fields, "birthDate"),
+            birthTime: normalize(fields, "birthTime"),
+            birthLocation: normalize(fields, "birthPlace")
+          }
+        : null
     };
 
+    /* ----------------------------------------------------------
+       5) Full multi-engine Insight Pipeline (Stage 2)
+    ---------------------------------------------------------- */
     const insights = await generateInsights({
       question,
       enginesInput
     });
 
-    // ALWAYS RETURN SHORT ANSWER
+    /* ----------------------------------------------------------
+       6) Always return short answer and full insights
+    ---------------------------------------------------------- */
     return res.status(200).json({
       ok: true,
       mode: isPersonal ? "personal" : "technical",
