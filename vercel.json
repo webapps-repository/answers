@@ -13,6 +13,7 @@
     }
   ],
   "env": {
-    "PLAYWRIGHT_BROWSERS_PATH": "0"
+    "CHROMIUM_PATH": "/var/task/node_modules/@sparticuz/chromium/bin/chromium",
+    "AWS_LAMBDA_JS_RUNTIME": "nodejs22.x"
   }
 }
