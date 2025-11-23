@@ -1,4 +1,9 @@
 // /api/technical-report.js — FIXED FULL VERSION
+// /api/technical-report.js — FIXED FULL VERSION
+// /api/technical-report.js — FIXED FULL VERSION
+// /api/technical-report.js — FIXED FULL VERSION
+// /api/technical-report.js — FIXED FULL VERSION
+
 export const config = {
   api: { bodyParser: false },
   runtime: "nodejs"
