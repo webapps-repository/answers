@@ -1,19 +1,17 @@
 {
   "name": "answers",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "type": "module",
-  "engines": { "node": "22.x" },
-
-  "scripts": {
-    "start": "node api/spiritual-report.js",
-    "build": "echo 'Build complete'",
-    "postinstall": "npx playwright install chromium"
+  "engines": {
+    "node": "22.x"
   },
-
+  "scripts": {
+    "build": "echo 'Build complete'",
+    "start": "node api/spiritual-report.js"
+  },
   "dependencies": {
     "@sparticuz/chromium": "^119.0.0",
-    "playwright-core": "^1.42.0",
-    "playwright": "^1.42.0",
+    "puppeteer-core": "^22.6.4",
     "@resvg/resvg-js": "^2.4.0",
     "astronomy-engine": "^2.1.19",
     "formidable": "^3.5.1",
@@ -24,10 +22,6 @@
     "resend": "^6.5.0",
     "satori": "^0.10.10",
     "yoga-wasm-web": "^0.3.0"
-  },
-
-  "playwright": {
-    "browsers": ["chromium"]
   }
 }
 
