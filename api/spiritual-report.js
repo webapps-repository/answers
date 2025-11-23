@@ -1,15 +1,11 @@
-// /api/spiritual-report.js — FIXED FULL VERSION
-// /api/spiritual-report.js — FIXED FULL VERSION
-// /api/spiritual-report.js — FIXED FULL VERSION
-// /api/spiritual-report.js — FIXED FULL VERSION
-// /api/spiritual-report.js — FIXED FULL VERSION
-
+// /api/spiritual-report.js
 export const config = {
   api: { bodyParser: false },
   runtime: "nodejs"
 };
 
 import formidable from "formidable";
+
 import {
   applyCORS,
   normalize,
@@ -35,14 +31,14 @@ export default async function handler(req, res) {
     );
 
     const question = normalize(fields, "question");
-    const isPersonal = normalize(fields, "isPersonal") === "true";
-    const email = normalize(fields, "email");
-
     if (!question) return res.status(400).json({ error: "Missing question" });
 
     const recaptchaToken = normalize(fields, "recaptchaToken");
     const captcha = await verifyRecaptcha(recaptchaToken);
     if (!captcha.ok) return res.status(400).json({ error: "Invalid reCAPTCHA" });
+
+    const isPersonal = normalize(fields, "isPersonal") === "true";
+    const email = normalize(fields, "email");
 
     let palm = null;
     if (files.palmImage?.filepath) {
@@ -54,48 +50,49 @@ export default async function handler(req, res) {
 
     const enginesInput = {
       palm,
-      numerology: isPersonal
-        ? { fullName: normalize(fields, "fullName"), dateOfBirth: normalize(fields, "birthDate") }
-        : null,
-      astrology: isPersonal
-        ? {
-            birthDate: normalize(fields, "birthDate"),
-            birthTime: normalize(fields, "birthTime"),
-            birthLocation: normalize(fields, "birthPlace")
-          }
-        : null
+      numerology: isPersonal ? {
+        fullName: normalize(fields, "fullName"),
+        dateOfBirth: normalize(fields, "birthDate")
+      } : null,
+      astrology: isPersonal ? {
+        birthDate: normalize(fields, "birthDate"),
+        birthTime: normalize(fields, "birthTime"),
+        birthLocation: normalize(fields, "birthPlace")
+      } : null
     };
 
-    const insights = await generateInsights({ question, enginesInput });
+    const insights = await generateInsights({
+      question,
+      enginesInput
+    });
 
-    // Always return short answer
-    const shortAnswer = insights.shortAnswer || "No answer generated.";
+    // ✨ Generate PDF
+    const pdfHTML = `
+      <h1>Spiritual Report</h1>
+      <pre>${JSON.stringify(insights, null, 2)}</pre>
+    `;
 
-    // PERSONAL MODE → send full PDF by email
-    if (isPersonal && email) {
-      const html = `
-        <h1>Your Personal Spiritual Report</h1>
-        <pre>${JSON.stringify(insights, null, 2)}</pre>
-      `;
-      const pdf = await generatePDFBufferFromHTML(html);
+    const pdfBuffer = await generatePDFBufferFromHTML(pdfHTML);
 
-      await sendEmailHTML({
-        to: email,
-        subject: "Your Personal Spiritual Report",
-        html: "<p>Your full report is attached.</p>",
-        attachments: [{ filename: "spiritual-report.pdf", content: pdf }]
-      });
-    }
+    // ✉ Send
+    await sendEmailHTML({
+      to: email,
+      subject: "Your Spiritual Report",
+      html: `<p>Your full report is attached.</p>`,
+      attachments: [
+        { filename: "spiritual-report.pdf", content: pdfBuffer }
+      ]
+    });
 
     return res.status(200).json({
       ok: true,
       mode: isPersonal ? "personal" : "technical",
-      shortAnswer,
+      shortAnswer: insights.shortAnswer,
       insights
     });
 
   } catch (err) {
     console.error("SPIRITUAL ERROR:", err);
-    return res.status(500).json({ error: "Server error", detail: err.message });
+    return res.status(500).json({ error: "Server error" });
   }
 }
