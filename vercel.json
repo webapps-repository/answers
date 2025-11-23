@@ -13,6 +13,7 @@
     }
   ],
   "env": {
-    "PLAYWRIGHT_BROWSERS_PATH": "0"
+    "PLAYWRIGHT_BROWSERS_PATH": "0",
+    "AWS_LAMBDA_FUNCTION_MEMORY_SIZE": "1024"
   }
 }
