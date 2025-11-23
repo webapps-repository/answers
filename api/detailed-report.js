@@ -1,4 +1,9 @@
 // /api/detailed-report.js — FIXED FULL VERSION
+// /api/detailed-report.js — FIXED FULL VERSION
+// /api/detailed-report.js — FIXED FULL VERSION
+// /api/detailed-report.js — FIXED FULL VERSION
+// /api/detailed-report.js — FIXED FULL VERSION
+
 export const config = {
   api: { bodyParser: false },
   runtime: "nodejs"
