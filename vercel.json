@@ -12,4 +12,7 @@
       "destination": "/api/$1.js"
     }
   ]
+  "env": {
+    "PLAYWRIGHT_BROWSERS_PATH": "0"
+  }
 }
