@@ -1,4 +1,4 @@
-// /api/technical-report.js — V2 Mandatory, Email Required
+// /api/technical-report.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const config = { api: { bodyParser: false } };
@@ -6,31 +6,36 @@ export const config = { api: { bodyParser: false } };
 import formidable from "formidable";
 import {
   normalize,
+  validateUploadedFile,
   verifyRecaptcha,
   sendEmailHTML
 } from "../lib/utils.js";
 import { generateInsights } from "../lib/insights.js";
+import { runAllEngines } from "../lib/engines.js";
+import {
+  buildSummaryHTML,
+  buildUniversalEmailHTML
+} from "../lib/insights.js";
 
 export default async function handler(req, res) {
-
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization, X-Requested-With, Accept, Origin"
   );
-
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
+  if (req.method !== "POST") return res.status(405).json({ error: "Not allowed" });
 
   // Parse form
-  let fields;
+  const form = formidable({ multiples: false });
+  let fields, files;
+
   try {
-    const form = formidable({ multiples: false });
-    ({ fields } = await new Promise((resolve, reject) =>
-      form.parse(req, (err, f) =>
-        err ? reject(err) : resolve({ fields: f })
+    ({ fields, files } = await new Promise((resolve, reject) =>
+      form.parse(req, (err, f, fl) =>
+        err ? reject(err) : resolve({ fields: f, files: fl })
       )
     ));
   } catch {
@@ -40,47 +45,59 @@ export default async function handler(req, res) {
   const email = normalize(fields, "email");
   const question = normalize(fields, "question");
 
-  if (!email) return res.status(400).json({ error: "Email required" });
-  if (!question) return res.status(400).json({ error: "Question required" });
-
-  // Mandatory recaptcha
   const recaptchaToken =
     normalize(fields, "recaptchaToken") ||
     normalize(fields, "g-recaptcha-response") ||
-    normalize(fields, "captcha");
+    normalize(fields, "token");
 
+  if (!email) return res.status(400).json({ error: "Email required" });
+  if (!question) return res.status(400).json({ error: "Question required" });
+
+  // recaptcha
   const rec = await verifyRecaptcha(recaptchaToken, req.headers["x-forwarded-for"]);
-  if (!rec.ok)
-    return res.status(400).json({ error: "Invalid reCAPTCHA", rec });
+  if (!rec.ok) return res.status(400).json({ error: "Invalid reCAPTCHA", rec });
 
-  let insights;
-  try {
-    insights = await generateInsights({
-      question,
-      enginesInput: {}
-    });
-  } catch {
-    return res.status(500).json({ error: "Insight engine failure" });
+  const uploadedFile = files?.technicalFile || null;
+  if (uploadedFile) {
+    const valid = validateUploadedFile(uploadedFile);
+    if (!valid.ok) return res.status(400).json({ error: valid.error });
   }
 
-  const subject = `Your Technical Report — ${new Date().toLocaleString()}`;
-  const html = `
-    <div style="font-family:Arial; line-height:1.55;">
-      <h2>Your Technical Insight Report</h2>
-      <div style="background:#f8f6ff; padding:14px; border-radius:10px; white-space:pre-wrap;">
-        ${JSON.stringify(insights, null, 2)}
-      </div>
-    </div>
-  `;
+  // Run engines (technical mode)
+  let enginesOut;
+  try {
+    enginesOut = await runAllEngines({
+      question,
+      mode: "technical",
+      uploadedFile
+    });
+  } catch (err) {
+    return res.status(500).json({ error: "Engine failure" });
+  }
+
+  // Short answer
+  const shortHTML = buildSummaryHTML({
+    classification: { type: "technical" },
+    engines: enginesOut,
+    question
+  });
+
+  // Long HTML email
+  const longHTML = buildUniversalEmailHTML({
+    title: "Your Technical Analysis Report",
+    question,
+    engines: enginesOut
+  });
 
   await sendEmailHTML({
     to: email,
-    subject,
-    html
+    subject: "Your Technical Analysis Report",
+    html: longHTML
   });
 
-  return res.status(200).json({
+  return res.json({
     ok: true,
-    emailed: true
+    mode: "technical",
+    shortAnswer: shortHTML
   });
 }
