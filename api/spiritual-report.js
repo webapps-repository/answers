@@ -74,6 +74,8 @@ export default async function handler(req, res) {
   /* ----------------------------------------------------------
      Verify reCAPTCHA
   ---------------------------------------------------------- */
+  console.log("DEBUG recaptchaToken:", JSON.stringify(recaptchaToken));
+  console.log("DEBUG fields:", JSON.stringify(fields));
   const rec = await verifyRecaptcha(
     recaptchaToken,
     req.headers["x-forwarded-for"]
