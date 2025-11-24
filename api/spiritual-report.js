@@ -17,42 +17,22 @@ import {
   buildUniversalEmailHTML
 } from "../lib/insights.js";
 
-// Allowed Shopify domains ONLY
-const allowedOrigins = [
-  "https://zzqejx-u8.myshopify.com",
-  "https://zzeqjx-u8.myshopify.com",
-  "https://www.zzqejx-u8.myshopify.com"
-];
-
 export default async function handler(req, res) {
-  /* ----------------------------------------------------------
-     CORS — Shopify-friendly (NO WILDCARD!!!)
-  ---------------------------------------------------------- */
-  const origin = req.headers.origin;
-
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-
-  res.setHeader("Access-Control-Allow-Credentials", "true");
+  // CORS
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization, X-Requested-With, Accept, Origin"
   );
-
-  // Shopify always sends OPTIONS → MUST return clean 200
   if (req.method === "OPTIONS") return res.status(200).end();
-
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
-  /* ----------------------------------------------------------
-     Parse multipart form-data
-  ---------------------------------------------------------- */
+  // Parse form
   const form = formidable({ multiples: false, maxFileSize: 12 * 1024 * 1024 });
-
   let fields, files;
+
   try {
     ({ fields, files } = await new Promise((resolve, reject) =>
       form.parse(req, (err, f, fl) =>
@@ -60,13 +40,14 @@ export default async function handler(req, res) {
       )
     ));
   } catch (err) {
-    console.error("❌ Form parse error:", err);
+    console.error("PARSE ERROR:", err);
     return res.status(400).json({ error: "Bad form data" });
   }
 
-  /* ----------------------------------------------------------
-     Extract user fields
-  ---------------------------------------------------------- */
+  console.log("FIELDS:", JSON.stringify(fields));
+  console.log("FILES:", JSON.stringify(files));
+
+  // Extract (robust)
   const question = normalize(fields, "question");
   const email = normalize(fields, "email");
   const fullName = normalize(fields, "fullName");
@@ -74,40 +55,33 @@ export default async function handler(req, res) {
   const birthTime = normalize(fields, "birthTime");
   const birthPlace = normalize(fields, "birthPlace");
 
-  // MULTI-TOKEN FIX (supports all V2 recaptcha names)
+  // recaptcha
   const recaptchaToken =
     normalize(fields, "recaptchaToken") ||
     normalize(fields, "g-recaptcha-response") ||
-    normalize(fields, "token") ||
+    normalize(fields, "g-recaptcha-response[]") ||
+    normalize(fields, "h-captcha-response") ||
     normalize(fields, "captcha") ||
-    normalize(fields, "recaptcha");
+    normalize(fields, "token");
 
   if (!question) return res.status(400).json({ error: "Missing question" });
   if (!email) return res.status(400).json({ error: "Missing email" });
 
-  /* ----------------------------------------------------------
-     Verify reCAPTCHA (MANDATORY)
-  ---------------------------------------------------------- */
+  // verify recaptcha
   const rec = await verifyRecaptcha(recaptchaToken, req.headers["x-forwarded-for"]);
   if (!rec.ok) {
-    console.error("❌ Recaptcha:", rec);
-    return res.status(400).json({ error: "recaptcha failed", rec });
+    console.error("RECAPTCHA FAIL:", rec);
+    return res.status(400).json({ error: "reCAPTCHA failed", rec });
   }
 
-  /* ----------------------------------------------------------
-     Optional file upload
-  ---------------------------------------------------------- */
+  // Optional file
   const uploadedFile = files?.technicalFile || files?.palmImage || null;
-
   if (uploadedFile) {
     const valid = validateUploadedFile(uploadedFile);
-    if (!valid.ok)
-      return res.status(400).json({ error: valid.error });
+    if (!valid.ok) return res.status(400).json({ error: valid.error });
   }
 
-  /* ----------------------------------------------------------
-     Classification (still used for summary)
-  ---------------------------------------------------------- */
+  // classification
   let cls;
   try {
     cls = await classifyQuestion(question);
@@ -115,9 +89,7 @@ export default async function handler(req, res) {
     cls = { type: "personal", confidence: 0.5 };
   }
 
-  /* ----------------------------------------------------------
-     Run all engines (always PERSONAL mode)
-  ---------------------------------------------------------- */
+  // engines
   let enginesOut;
   try {
     enginesOut = await runAllEngines({
@@ -126,22 +98,18 @@ export default async function handler(req, res) {
       uploadedFile
     });
   } catch (err) {
-    console.error("❌ Engine failure:", err);
+    console.error("ENGINE ERROR:", err);
     return res.status(500).json({ error: "Engine failure" });
   }
 
-  /* ----------------------------------------------------------
-     SHORT ANSWER (shown on Shopify page)
-  ---------------------------------------------------------- */
+  // short answer
   const shortHTML = buildSummaryHTML({
     classification: cls,
     engines: enginesOut,
     question
   });
 
-  /* ----------------------------------------------------------
-     LONG ANSWER EMAIL (Universal template)
-  ---------------------------------------------------------- */
+  // long email
   const longHTML = buildUniversalEmailHTML({
     title: "Your Personal Insight Report",
     question,
@@ -152,16 +120,11 @@ export default async function handler(req, res) {
     birthPlace
   });
 
-  const emailResult = await sendEmailHTML({
+  await sendEmailHTML({
     to: email,
     subject: "Your Personal Insight Report",
     html: longHTML
   });
-
-  if (!emailResult.success) {
-    console.error("❌ Email error:", emailResult.error);
-    return res.status(500).json({ error: "Email failed" });
-  }
 
   return res.json({
     ok: true,
