@@ -1,22 +1,17 @@
 // /api/detailed-report.js — Stage-3 (HTML-only full technical email)
+export const runtime = "nodejs";            // REQUIRED for formidable + email + env
+export const dynamic = "force-dynamic";     // Prevents caching of POST endpoints
+export const config = { api: { bodyParser: false } };
 
 import formidable from "formidable";
-import {
-  normalize,
-  verifyRecaptcha,
-  sendEmailHTML
-} from "../lib/utils.js";
+import { normalize, verifyRecaptcha, sendEmailHTML } from "../lib/utils.js";
 import { generateInsights } from "../lib/insights.js";
-
-export const config = {
-  api: { bodyParser: false }
-};
 
 export default async function handler(req, res) {
   /* ----------------------------------------------------------
-     CORS (must run before ANYTHING else)
+     CORS (must run BEFORE anything else)
   ---------------------------------------------------------- */
-  res.setHeader("Access-Control-Allow-Origin", "*"); // lock to Shopify later
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader(
@@ -24,22 +19,20 @@ export default async function handler(req, res) {
     "Content-Type, Authorization, X-Requested-With, Accept, Origin"
   );
 
-  if (req.method === "OPTIONS") {
+  if (req.method === "OPTIONS")
     return res.status(200).end();
-  }
 
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ error: "Method Not Allowed" });
-  }
 
   /* ----------------------------------------------------------
-     Parse form-data
+     Parse multipart form-data
   ---------------------------------------------------------- */
   let fields;
   try {
     const form = formidable({ multiples: false });
     ({ fields } = await new Promise((resolve, reject) =>
-      form.parse(req, (err, f, files) =>
+      form.parse(req, (err, f) =>
         err ? reject(err) : resolve({ fields: f })
       )
     ));
@@ -61,7 +54,10 @@ export default async function handler(req, res) {
   /* ----------------------------------------------------------
      Verify reCAPTCHA
   ---------------------------------------------------------- */
-  const rec = await verifyRecaptcha(recaptchaToken, req.headers["x-forwarded-for"]);
+  const rec = await verifyRecaptcha(
+    recaptchaToken,
+    req.headers["x-forwarded-for"]
+  );
   if (!rec.ok)
     return res.status(400).json({ error: "reCAPTCHA failed", rec });
 
@@ -72,7 +68,7 @@ export default async function handler(req, res) {
   try {
     insights = await generateInsights({
       question,
-      enginesInput: {} // technical mode = no personal engines
+      enginesInput: {}
     });
   } catch (err) {
     console.error("❌ Insight generation error:", err);
@@ -80,10 +76,9 @@ export default async function handler(req, res) {
   }
 
   /* ----------------------------------------------------------
-     Build clean HTML email (pretty display)
+     Build email HTML
   ---------------------------------------------------------- */
   const subject = `Your Full Technical Report — ${new Date().toLocaleString()}`;
-
   const html = `
     <div style="font-family:Arial,Helvetica,sans-serif; line-height:1.55; color:#222; max-width:760px; margin:auto">
       <h2 style="color:#4B0082; margin-bottom:12px">Your Full Technical Insight Report</h2>
@@ -103,7 +98,7 @@ export default async function handler(req, res) {
   `;
 
   /* ----------------------------------------------------------
-     Send the HTML email
+     Send email
   ---------------------------------------------------------- */
   const sent = await sendEmailHTML({
     to: email,
@@ -116,11 +111,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: sent.error });
   }
 
-  /* ----------------------------------------------------------
-     Success
-  ---------------------------------------------------------- */
-  return res.status(200).json({
-    ok: true,
-    emailed: true
-  });
+  return res.status(200).json({ ok: true, emailed: true });
 }
