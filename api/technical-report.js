@@ -1,4 +1,5 @@
-// /api/technical-report.js
+// /api/technical-report.js — Stage-3 (HTML email only)
+
 export const config = {
   api: { bodyParser: false },
   runtime: "nodejs"
@@ -10,11 +11,10 @@ import {
   applyCORS,
   normalize,
   verifyRecaptcha,
-  sendEmailHTML
+  sendHtmlEmail
 } from "../lib/utils.js";
 
 import { generateInsights } from "../lib/insights.js";
-import { generatePDFBufferFromHTML } from "../lib/pdf.js";
 
 export default async function handler(req, res) {
   if (applyCORS(req, res)) return;
@@ -37,8 +37,7 @@ export default async function handler(req, res) {
     const recaptchaToken = normalize(fields, "recaptchaToken");
     if (recaptchaToken) {
       const recaptcha = await verifyRecaptcha(recaptchaToken);
-      if (!recaptcha.ok)
-        return res.status(400).json({ error: "Invalid reCAPTCHA" });
+      if (!recaptcha.ok) return res.status(400).json({ error: "Invalid reCAPTCHA" });
     }
 
     const insights = await generateInsights({
@@ -46,29 +45,19 @@ export default async function handler(req, res) {
       enginesInput: {}
     });
 
-    const pdfHtml = await generatePDFBufferFromHTML(`
-      <h1>Technical Report</h1>
+    const subject = `Your Technical Report — ${new Date().toLocaleString()}`;
+    const html = `
+      <h1>Your Technical Report</h1>
+      <p>Below is your full technical analysis:</p>
       <pre>${JSON.stringify(insights, null, 2)}</pre>
-    `);
+    `;
 
-    const emailResult = await sendEmailHTML({
-      to: email,
-      subject: "Your Technical Report",
-      html: `<p>Your report is attached.</p>`,
-      attachments: [
-        {
-          filename: "technical-report.pdf",
-          content: pdfHtml,
-          type: "text/html",
-          disposition: "inline"
-        }
-      ]
-    });
+    const sent = await sendHtmlEmail({ to: email, subject, html });
 
-    if (!emailResult.success)
-      return res.status(500).json({ error: "Email failed", detail: emailResult.error });
+    if (!sent.success)
+      return res.status(500).json({ ok: false, error: sent.error });
 
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({ ok: true, emailed: true });
 
   } catch (err) {
     console.error("TECH REPORT ERROR:", err);
