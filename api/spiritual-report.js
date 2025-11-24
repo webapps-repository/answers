@@ -1,53 +1,52 @@
 // /api/spiritual-report.js — Stage-3 (HTML-only, Clean Output)
-
-import formidable from "formidable";
-import { normalize, validateUploadedFile, verifyRecaptcha, sendEmailHTML } from "../lib/utils.js";
-import { classifyQuestion } from "../lib/ai.js";
-import { runAllEngines } from "../lib/engines.js";
-import { buildSummaryHTML, buildPersonalEmailHTML } from "../lib/insights.js";
-
+export const runtime = "nodejs";           // REQUIRED for formidable, Resend, env vars
+export const dynamic = "force-dynamic";    // Prevents Vercel caching of POST endpoints
 export const config = { api: { bodyParser: false } };
 
-export default async function handler(req, res) {
+import formidable from "formidable";
+import {
+  normalize,
+  validateUploadedFile,
+  verifyRecaptcha,
+  sendEmailHTML
+} from "../lib/utils.js";
+import { classifyQuestion } from "../lib/ai.js";
+import { runAllEngines } from "../lib/engines.js";
+import {
+  buildSummaryHTML,
+  buildPersonalEmailHTML
+} from "../lib/insights.js";
 
-  // ----------------------------------------
-  // 0) CORS — MUST COME BEFORE ANYTHING ELSE
-  // ----------------------------------------
-  res.setHeader("Access-Control-Allow-Origin", "*"); // lock to Shopify domain later
+export default async function handler(req, res) {
+  /* ----------------------------------------------------------
+     CORS — MUST COME BEFORE ANYTHING ELSE
+  ---------------------------------------------------------- */
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization, X-Requested-With, Accept, Origin"
   );
+  if (req.method === "OPTIONS") return res.status(200).end();
 
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  if (req.method === "GET") {
+  if (req.method === "GET")
     return res.status(200).json({ success: true, message: "OK" });
-  }
 
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ success: false, error: "Method not allowed" });
-  }
+
   /* ----------------------------------------------------------
      Parse multipart form-data
   ---------------------------------------------------------- */
-  const form = formidable({
-    multiples: false,
-    maxFileSize: 12 * 1024 * 1024
-  });
+  const form = formidable({ multiples: false, maxFileSize: 12 * 1024 * 1024 });
 
   let fields, files;
-
   try {
-    ({ fields, files } = await new Promise((resolve, reject) => {
-      form.parse(req, (err, f, fl) => {
-        if (err) reject(err);
-        else resolve({ fields: f, files: fl });
-      });
-    }));
+    ({ fields, files } = await new Promise((resolve, reject) =>
+      form.parse(req, (err, f, fl) =>
+        err ? reject(err) : resolve({ fields: f, files: fl })
+      )
+    ));
   } catch (err) {
     console.error("❌ Form parse error:", err);
     return res.status(400).json({ error: "Bad form data" });
@@ -57,16 +56,20 @@ export default async function handler(req, res) {
      Normalize inputs
   ---------------------------------------------------------- */
   const question = normalize(fields, "question");
-  const isPersonal = String(normalize(fields, "isPersonal")).toLowerCase() === "true";
+  const isPersonal =
+    String(normalize(fields, "isPersonal")).toLowerCase() === "true";
   const recaptchaToken = normalize(fields, "recaptchaToken");
 
   if (!question)
     return res.status(400).json({ error: "Missing question" });
 
   /* ----------------------------------------------------------
-     reCAPTCHA verify
+     Verify reCAPTCHA
   ---------------------------------------------------------- */
-  const rec = await verifyRecaptcha(recaptchaToken, req.headers["x-forwarded-for"]);
+  const rec = await verifyRecaptcha(
+    recaptchaToken,
+    req.headers["x-forwarded-for"]
+  );
   if (!rec.ok)
     return res.status(400).json({ error: "Recaptcha failed", rec });
 
@@ -82,12 +85,9 @@ export default async function handler(req, res) {
   }
 
   /* ----------------------------------------------------------
-     Optional file (technical or palm)
+     Optional file (technical/palm)
   ---------------------------------------------------------- */
-  let uploadedFile = null;
-
-  if (files?.technicalFile) uploadedFile = files.technicalFile;
-  if (files?.palmImage) uploadedFile = files.palmImage;
+  let uploadedFile = files?.technicalFile || files?.palmImage || null;
 
   if (uploadedFile) {
     const valid = validateUploadedFile(uploadedFile);
@@ -111,7 +111,7 @@ export default async function handler(req, res) {
   }
 
   /* ----------------------------------------------------------
-     Build short HTML summary (CLEAN SAFE MARKUP)
+     Build short HTML summary
   ---------------------------------------------------------- */
   const shortHTML = buildSummaryHTML({
     classification: cls,
@@ -120,7 +120,7 @@ export default async function handler(req, res) {
   });
 
   /* ----------------------------------------------------------
-     PERSONAL MODE → Email full HTML report immediately
+     PERSONAL MODE → email full report
   ---------------------------------------------------------- */
   if (isPersonal) {
     const email = normalize(fields, "email");
@@ -141,7 +141,6 @@ export default async function handler(req, res) {
       birthPlace
     });
 
-    // Send HTML email
     await sendEmailHTML({
       to: email,
       subject: "Your Personal AI Insight Report",
@@ -156,7 +155,7 @@ export default async function handler(req, res) {
   }
 
   /* ----------------------------------------------------------
-     TECHNICAL MODE → Return summary; full report via /detailed
+     TECHNICAL MODE
   ---------------------------------------------------------- */
   return res.json({
     ok: true,
