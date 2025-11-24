@@ -1,89 +1,93 @@
-// /api/spiritual-report.js
-import formidable from "formidable";
-import { getShortAnswer, generateFullInsights } from "../lib/insights.js";
-import { sendHtmlEmail } from "../lib/utils.js";
+// /api/spiritual-report.js — Stage-3 (HTML email only)
 
 export const config = {
-  api: { bodyParser: false }
+  api: { bodyParser: false },
+  runtime: "nodejs"
 };
 
+import formidable from "formidable";
+
+import {
+  applyCORS,
+  normalize,
+  verifyRecaptcha,
+  sendHtmlEmail    // <-- Stage-3 function
+} from "../lib/utils.js";
+
+import { analyzePalm } from "../lib/engines.js";
+import { generateInsights } from "../lib/insights.js";
+
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (applyCORS(req, res)) return;
+
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method Not Allowed" });
 
   try {
-    const form = formidable({ multiples: false });
+    const form = formidable({ keepExtensions: true });
+    const { fields, files } = await new Promise((resolve, reject) =>
+      form.parse(req, (err, f, fs) => err ? reject(err) : resolve({ fields: f, files: fs }))
+    );
 
-    const data = await new Promise((resolve, reject) => {
-      form.parse(req, (err, fields, files) => {
-        if (err) reject(err);
-        resolve({ fields, files });
+    const question = normalize(fields, "question");
+    if (!question) return res.status(400).json({ error: "Missing question" });
+
+    const recaptchaToken = normalize(fields, "recaptchaToken");
+    const captcha = await verifyRecaptcha(recaptchaToken, req.headers["x-real-ip"]);
+    if (!captcha.ok) return res.status(400).json({ error: "Invalid reCAPTCHA" });
+
+    const isPersonal = normalize(fields, "isPersonal") === "true";
+    const email = normalize(fields, "email");
+
+    // Optional palmistry upload
+    let palm = null;
+    if (files.palmImage?.filepath) {
+      palm = await analyzePalm({
+        imageDescription: "Palm Photo",
+        handMeta: {}
       });
-    });
+    }
 
-    const {
-      name,
-      email,
-      dob,
-      gender,
-      country,
-      state,
-      question
-    } = data.fields;
+    const enginesInput = {
+      palm,
+      numerology: isPersonal ? {
+        fullName: normalize(fields, "fullName"),
+        dateOfBirth: normalize(fields, "birthDate")
+      } : null,
+      astrology: isPersonal ? {
+        birthDate: normalize(fields, "birthDate"),
+        birthTime: normalize(fields, "birthTime"),
+        birthLocation: normalize(fields, "birthPlace")
+      } : null
+    };
 
-    // Short visible answer
-    const shortAnswer = await getShortAnswer(question);
+    const insights = await generateInsights({ question, enginesInput });
 
-    // Long-form insights for HTML email
-    const fullInsights = await generateFullInsights({
-      name,
-      dob,
-      gender,
-      country,
-      state,
-      question
-    });
+    // 🔥 PERSONAL MODE → SEND EMAIL
+    if (isPersonal) {
+      const subject = `Your Personal AI Insight — ${new Date().toLocaleString()}`;
+      const html = `
+        <h1>Your Personal AI Insight Report</h1>
+        <p>Here is your full personal reading:</p>
+        <pre>${JSON.stringify(insights, null, 2)}</pre>
+      `;
 
-    // Build HTML email
-    const htmlContent = `
-      <div style="font-family:Arial, sans-serif; padding:20px;">
-        <h2>Your Personal Spiritual Report</h2>
+      await sendHtmlEmail({ to: email, subject, html });
 
-        <p style="font-size:16px;">Hi ${name || "there"},</p>
+      return res.status(200).json({
+        ok: true,
+        mode: "personal",
+        shortAnswer: insights.shortAnswer,
+        emailed: true
+      });
+    }
 
-        <p style="font-size:15px;">
-          Here is your personal spiritual report based on your submitted information.
-        </p>
-
-        <h3>Short Answer</h3>
-        <div style="background:#f4f4ff; padding:15px; border-radius:8px; margin-bottom:25px;">
-          ${shortAnswer}
-        </div>
-
-        <h3>Full Insights</h3>
-        <div style="line-height:1.6; font-size:15px;">
-          ${fullInsights}
-        </div>
-
-        <br><br>
-        <p style="font-size:13px;color:#888;">
-          You are receiving this because you requested a personal spiritual reading.
-        </p>
-      </div>
-    `;
-
-    // Send email through resend
-    await sendHtmlEmail({
-      to: email,
-      subject: "Your Personal Spiritual Report",
-      html: htmlContent
-    });
-
+    // 🔥 TECHNICAL MODE → return short answer
     return res.status(200).json({
       ok: true,
-      message: "Email sent",
-      shortAnswer
+      mode: "technical",
+      shortAnswer: insights.shortAnswer,
+      insights
     });
 
   } catch (err) {
