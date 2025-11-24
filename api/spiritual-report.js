@@ -1,97 +1,152 @@
-// /api/spiritual-report.js — Stage-3 (HTML email only)
-
-export const config = {
-  api: { bodyParser: false },
-  runtime: "nodejs"
-};
+// /api/spiritual-report.js — Stage-3 (HTML-only, Clean Output)
 
 import formidable from "formidable";
+import { applyCORS, normalize, validateUploadedFile, verifyRecaptcha, sendEmailHTML } from "../lib/utils.js";
+import { classifyQuestion } from "../lib/ai.js";
+import { runAllEngines } from "../lib/engines.js";
+import { buildSummaryHTML, buildPersonalEmailHTML } from "../lib/insights.js";
 
-import {
-  applyCORS,
-  normalize,
-  verifyRecaptcha,
-  sendHtmlEmail    // <-- Stage-3 function
-} from "../lib/utils.js";
-
-import { analyzePalm } from "../lib/engines.js";
-import { generateInsights } from "../lib/insights.js";
+export const config = {
+  api: { bodyParser: false }
+};
 
 export default async function handler(req, res) {
+  // CORS preflight
   if (applyCORS(req, res)) return;
 
   if (req.method !== "POST")
-    return res.status(405).json({ error: "Method Not Allowed" });
+    return res.status(405).json({ error: "Method not allowed" });
+
+  /* ----------------------------------------------------------
+     Parse multipart form-data
+  ---------------------------------------------------------- */
+  const form = formidable({
+    multiples: false,
+    maxFileSize: 12 * 1024 * 1024
+  });
+
+  let fields, files;
 
   try {
-    const form = formidable({ keepExtensions: true });
-    const { fields, files } = await new Promise((resolve, reject) =>
-      form.parse(req, (err, f, fs) => err ? reject(err) : resolve({ fields: f, files: fs }))
-    );
+    ({ fields, files } = await new Promise((resolve, reject) => {
+      form.parse(req, (err, f, fl) => {
+        if (err) reject(err);
+        else resolve({ fields: f, files: fl });
+      });
+    }));
+  } catch (err) {
+    console.error("❌ Form parse error:", err);
+    return res.status(400).json({ error: "Bad form data" });
+  }
 
-    const question = normalize(fields, "question");
-    if (!question) return res.status(400).json({ error: "Missing question" });
+  /* ----------------------------------------------------------
+     Normalize inputs
+  ---------------------------------------------------------- */
+  const question = normalize(fields, "question");
+  const isPersonal = normalize(fields, "isPersonal") === "true";
+  const recaptchaToken = normalize(fields, "recaptchaToken");
 
-    const recaptchaToken = normalize(fields, "recaptchaToken");
-    const captcha = await verifyRecaptcha(recaptchaToken, req.headers["x-real-ip"]);
-    if (!captcha.ok) return res.status(400).json({ error: "Invalid reCAPTCHA" });
+  if (!question)
+    return res.status(400).json({ error: "Missing question" });
 
-    const isPersonal = normalize(fields, "isPersonal") === "true";
+  /* ----------------------------------------------------------
+     reCAPTCHA verify
+  ---------------------------------------------------------- */
+  const rec = await verifyRecaptcha(recaptchaToken, req.headers["x-forwarded-for"]);
+  if (!rec.ok)
+    return res.status(400).json({ error: "Recaptcha failed", rec });
+
+  /* ----------------------------------------------------------
+     Classification
+  ---------------------------------------------------------- */
+  let cls;
+  try {
+    cls = await classifyQuestion(question);
+  } catch (err) {
+    console.error("❌ classify error:", err);
+    cls = { type: "technical", confidence: 0.5 };
+  }
+
+  /* ----------------------------------------------------------
+     Optional file (technical or palm)
+  ---------------------------------------------------------- */
+  let uploadedFile = null;
+
+  if (files?.technicalFile) uploadedFile = files.technicalFile;
+  if (files?.palmImage) uploadedFile = files.palmImage;
+
+  if (uploadedFile) {
+    const valid = validateUploadedFile(uploadedFile);
+    if (!valid.ok)
+      return res.status(400).json({ error: valid.error });
+  }
+
+  /* ----------------------------------------------------------
+     Run all engines (astrology, numerology, palmistry, triad)
+  ---------------------------------------------------------- */
+  let enginesOut;
+  try {
+    enginesOut = await runAllEngines({
+      question,
+      mode: isPersonal ? "personal" : cls.type,
+      uploadedFile
+    });
+  } catch (err) {
+    console.error("❌ engine error:", err);
+    return res.status(500).json({ error: "Engine failure" });
+  }
+
+  /* ----------------------------------------------------------
+     Build short HTML summary (CLEAN SAFE MARKUP)
+  ---------------------------------------------------------- */
+  const shortHTML = buildSummaryHTML({
+    classification: cls,
+    engines: enginesOut,
+    question
+  });
+
+  /* ----------------------------------------------------------
+     PERSONAL MODE → Email full HTML report immediately
+  ---------------------------------------------------------- */
+  if (isPersonal) {
     const email = normalize(fields, "email");
+    const fullName = normalize(fields, "fullName");
+    const birthDate = normalize(fields, "birthDate");
+    const birthTime = normalize(fields, "birthTime");
+    const birthPlace = normalize(fields, "birthPlace");
 
-    // Optional palmistry upload
-    let palm = null;
-    if (files.palmImage?.filepath) {
-      palm = await analyzePalm({
-        imageDescription: "Palm Photo",
-        handMeta: {}
-      });
-    }
+    if (!email)
+      return res.status(400).json({ error: "Missing email" });
 
-    const enginesInput = {
-      palm,
-      numerology: isPersonal ? {
-        fullName: normalize(fields, "fullName"),
-        dateOfBirth: normalize(fields, "birthDate")
-      } : null,
-      astrology: isPersonal ? {
-        birthDate: normalize(fields, "birthDate"),
-        birthTime: normalize(fields, "birthTime"),
-        birthLocation: normalize(fields, "birthPlace")
-      } : null
-    };
-
-    const insights = await generateInsights({ question, enginesInput });
-
-    // 🔥 PERSONAL MODE → SEND EMAIL
-    if (isPersonal) {
-      const subject = `Your Personal AI Insight — ${new Date().toLocaleString()}`;
-      const html = `
-        <h1>Your Personal AI Insight Report</h1>
-        <p>Here is your full personal reading:</p>
-        <pre>${JSON.stringify(insights, null, 2)}</pre>
-      `;
-
-      await sendHtmlEmail({ to: email, subject, html });
-
-      return res.status(200).json({
-        ok: true,
-        mode: "personal",
-        shortAnswer: insights.shortAnswer,
-        emailed: true
-      });
-    }
-
-    // 🔥 TECHNICAL MODE → return short answer
-    return res.status(200).json({
-      ok: true,
-      mode: "technical",
-      shortAnswer: insights.shortAnswer,
-      insights
+    const fullHTML = buildPersonalEmailHTML({
+      question,
+      engines: enginesOut,
+      fullName,
+      birthDate,
+      birthTime,
+      birthPlace
     });
 
-  } catch (err) {
-    console.error("SPIRITUAL ERROR:", err);
-    return res.status(500).json({ error: "Server error" });
+    // Send HTML email
+    await sendEmailHTML({
+      to: email,
+      subject: "Your Personal AI Insight Report",
+      html: fullHTML
+    });
+
+    return res.json({
+      ok: true,
+      mode: "personal",
+      shortAnswer: shortHTML
+    });
   }
+
+  /* ----------------------------------------------------------
+     TECHNICAL MODE → Return summary; full report via /detailed
+  ---------------------------------------------------------- */
+  return res.json({
+    ok: true,
+    mode: "technical",
+    shortAnswer: shortHTML
+  });
 }
