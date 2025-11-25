@@ -5,7 +5,7 @@
 // https://answers-rust.vercel.app/api/system-test.js?token=YOUR_TOKEN
 // https://answers-rust.vercel.app/api/system-test.js?token=TEST123
 
-// /api/system-test.js — FULL DEBUG MODE
+// /api/system-test.js — FULL DEBUG MODE WITH ENV KEY ENUM
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -40,17 +40,50 @@ export default async function handler(req, res) {
 
   const token =
     req.query.token ||
-    req.body?.token ||
     req.body?.recaptchaToken ||
+    req.body?.token ||
     null;
 
   const TOGGLE = process.env.RECAPTCHA_TOGGLE || "false";
 
+  /* -------------------------------------------
+     ENV KEY VALIDATION
+  ------------------------------------------- */
+
+  // 1. All keys provided by Vercel
+  const ALL_ENV_VARS = Object.keys(process.env);
+
+  // 2. Required keys for this project
+  const REQUIRED_KEYS = [
+    "RECAPTCHA_SECRET_KEY",
+    "RECAPTCHA_TOGGLE", 
+    "OPENAI_API_KEY",
+    "RESEND_API_KEY"
+  ];
+
+  // 3. Validate presence
+  const ENV_KEYS = {};
+  for (const key of ALL_ENV_VARS) {
+    // never send secret values, only boolean presence
+    ENV_KEYS[key] = process.env[key] ? true : false;
+  }
+
+  // 4. Missing required
+  const MISSING_REQUIRED = REQUIRED_KEYS.filter(
+    key => !process.env[key]
+  );
+
+  // 5. Extra (keys present but not required)
+  const EXTRA_KEYS = ALL_ENV_VARS.filter(
+    key => !REQUIRED_KEYS.includes(key)
+  );
+
   const ENV = {
     RECAPTCHA_TOGGLE: TOGGLE,
-    RECAPTCHA_SECRET_PRESENT: !!process.env.RECAPTCHA_SECRET_KEY,
-    OPENAI_API_KEY_PRESENT: !!process.env.OPENAI_API_KEY,
-    RESEND_API_KEY_PRESENT: !!process.env.RESEND_API_KEY,
+    REQUIRED_KEYS,
+    MISSING_REQUIRED,
+    ENV_KEYS,
+    EXTRA_KEYS
   };
 
   /* -------------------------------------------
@@ -132,7 +165,7 @@ export default async function handler(req, res) {
   }
 
   /* -------------------------------------------
-     EMAIL TEST
+     EMAIL TEST (dry run)
   ------------------------------------------- */
   if (process.env.RESEND_API_KEY) {
     try {
@@ -170,9 +203,10 @@ export default async function handler(req, res) {
     time_ms: Date.now() - start,
     method,
     IP,
-    ENV,
     TOKEN_PRESENT: !!token,
 
+    // Deep system diagnostics
+    ENV,
     RECAPTCHA,
     OPENAI_TEST,
     EMAIL_TEST,
