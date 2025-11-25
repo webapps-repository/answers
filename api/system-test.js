@@ -1,6 +1,7 @@
 // /api/system-test.js
 //
 // https://answers-rust.vercel.app/api/system-test.js
+// https://answers-rust.vercel.app/api/system-test.js?token=TEST
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
