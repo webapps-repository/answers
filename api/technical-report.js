@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 export const config = { api: { bodyParser: false } };
 
 import formidable from "formidable";
+
 import {
   normalize,
   validateUploadedFile,
@@ -18,23 +19,22 @@ import {
 } from "../lib/insights.js";
 
 export default async function handler(req, res) {
-  /* ---------------------------------------------
-     CORS
-  ---------------------------------------------- */
+
+  /* --------------------------
+       CORS
+  -------------------------- */
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization, X-Requested-With, Accept, Origin"
   );
-
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST")
-    return res.status(405).json({ error: "Not allowed" });
+  if (req.method !== "POST") return res.status(405).json({ error: "Not allowed" });
 
-  /* ---------------------------------------------
-     PARSE FORM (multipart/form-data)
-  ---------------------------------------------- */
+  /* --------------------------
+        PARSE FORM
+  -------------------------- */
   const form = formidable({ multiples: false });
   let fields, files;
 
@@ -45,16 +45,12 @@ export default async function handler(req, res) {
       )
     ));
   } catch (err) {
-    return res.status(400).json({ error: "Bad form data", detail: String(err) });
+    return res.status(400).json({ error: "Bad form data" });
   }
 
-  /* ---------------------------------------------
-     NORMALISE FIELDS
-  ---------------------------------------------- */
   const email = normalize(fields, "email");
   const question = normalize(fields, "question");
 
-  // Shopify invisible recaptcha sends only one of these
   const recaptchaToken =
     normalize(fields, "recaptchaToken") ||
     normalize(fields, "g-recaptcha-response") ||
@@ -62,44 +58,37 @@ export default async function handler(req, res) {
 
   if (!email) return res.status(400).json({ error: "Email required" });
   if (!question) return res.status(400).json({ error: "Question required" });
-  if (!recaptchaToken)
-    return res.status(400).json({ error: "Missing recaptcha token" });
 
-  /* ---------------------------------------------
-     VERIFY RECAPTCHA
-     IP detection must be corrected for Shopify + Vercel
-  ---------------------------------------------- */
-  const inferredIP =
-    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
-    req.headers["x-real-ip"] ||
-    "0.0.0.0";
+  /* --------------------------
+        VERIFY RECAPTCHA
+  -------------------------- */
+  const rec = await verifyRecaptcha(
+    recaptchaToken,
+    req.headers["x-forwarded-for"]
+  );
 
-  let rec;
-  try {
-    rec = await verifyRecaptcha(recaptchaToken, inferredIP);
-  } catch (err) {
-    return res.status(500).json({ error: "Recaptcha API failure", detail: String(err) });
-  }
-
-  if (!rec.ok)
+  if (!rec.ok) {
     return res.status(400).json({
       error: "Invalid reCAPTCHA",
-      google: rec
+      rec
     });
+  }
 
-  /* ---------------------------------------------
-     FILE VALIDATION (tech mode)
-  ---------------------------------------------- */
+  /* --------------------------
+        VALIDATE UPLOAD
+  -------------------------- */
   const uploadedFile = files?.technicalFile || null;
 
   if (uploadedFile) {
     const valid = validateUploadedFile(uploadedFile);
-    if (!valid.ok) return res.status(400).json({ error: valid.error });
+    if (!valid.ok) {
+      return res.status(400).json({ error: valid.error });
+    }
   }
 
-  /* ---------------------------------------------
-     RUN ENGINES (technical mode)
-  ---------------------------------------------- */
+  /* --------------------------
+        RUN ALL ENGINES
+  -------------------------- */
   let enginesOut;
 
   try {
@@ -109,27 +98,34 @@ export default async function handler(req, res) {
       uploadedFile
     });
   } catch (err) {
-    return res.status(500).json({ error: "Engine failure", detail: String(err) });
+    console.error("ENGINE ERROR:", err);
+    return res.status(500).json({
+      error: "Engine failure",
+      detail: String(err)
+    });
   }
 
-  /* ---------------------------------------------
-     BUILD SHORT + LONG OUTPUTS
-  ---------------------------------------------- */
+  /* --------------------------
+        SHORT SUMMARY HTML
+  -------------------------- */
   const shortHTML = buildSummaryHTML({
     classification: { type: "technical", confidence: 1 },
     engines: enginesOut,
     question
   });
 
+  /* --------------------------
+        LONG EMAIL HTML
+  -------------------------- */
   const longHTML = buildUniversalEmailHTML({
     title: "Your Technical Analysis Report",
     question,
     engines: enginesOut
   });
 
-  /* ---------------------------------------------
-     SEND EMAIL
-  ---------------------------------------------- */
+  /* --------------------------
+        SEND EMAIL
+  -------------------------- */
   try {
     await sendEmailHTML({
       to: email,
@@ -137,15 +133,16 @@ export default async function handler(req, res) {
       html: longHTML
     });
   } catch (err) {
+    console.error("EMAIL ERROR:", err);
     return res.status(500).json({
-      error: "Email send failure",
+      error: "Email failed",
       detail: String(err)
     });
   }
 
-  /* ---------------------------------------------
-     SUCCESS RESPONSE TO FRONTEND
-  ---------------------------------------------- */
+  /* --------------------------
+        SUCCESS RESPONSE
+  -------------------------- */
   return res.json({
     ok: true,
     mode: "technical",
