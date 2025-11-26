@@ -1,4 +1,7 @@
-// /api/spiritual-report.js — now supports compatibility mode safely
+// /api/spiritual-report.js
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const config = { api: { bodyParser: false } };
 
 import formidable from "formidable";
 import {
@@ -8,158 +11,144 @@ import {
   sendEmailHTML
 } from "../lib/utils.js";
 
+import { classifyQuestion } from "../lib/ai.js";
 import { runAllEngines } from "../lib/engines.js";
-import { buildSummaryHTML, buildUniversalEmailHTML } from "../lib/insights.js";
+import {
+  buildSummaryHTML,
+  buildUniversalEmailHTML
+} from "../lib/insights.js";
 
 export default async function handler(req, res) {
 
   /* CORS */
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin");
+  res.setHeader("Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With, Accept, Origin"
+  );
   if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Not allowed" });
 
-  if (req.method !== "POST")
-    return res.status(405).json({ error: "Not allowed" });
-
-  /* PARSE FORM */
+  /* Parse form */
   const form = formidable({
-    multiples: true,
-    maxFileSize: 20 * 1024 * 1024
+    multiples: false,
+    maxFileSize: 20 * 1024 * 1024,
+    keepExtensions: true
   });
 
-  let fields, files;
+  let fields = {}, files = {};
   try {
     ({ fields, files } = await new Promise((resolve, reject) =>
-      form.parse(req, (e, f, fl) => e ? reject(e) : resolve({ fields: f, files: fl }))
+      form.parse(req, (err, f, fl) =>
+        err ? reject(err) : resolve({ fields: f, files: fl })
+      )
     ));
-  } catch (e) {
-    return res.status(400).json({ error: "Bad form data" });
+  } catch (err) {
+    return res.status(400).json({ error: "Bad form data", detail: String(err) });
   }
 
-  /* FIELDS */
-  const mode = normalize(fields, "mode") || "personal";
-  const email = normalize(fields, "email");
+  const mode = normalize(fields, "mode") === "compat" ? "compat" : "personal";
+
   const question = normalize(fields, "question");
+  const email = normalize(fields, "email");
+  const recaptchaToken =
+    normalize(fields, "recaptchaToken") ||
+    normalize(fields, "token");
 
-  if (!email) return res.status(400).json({ error: "Missing email" });
   if (!question) return res.status(400).json({ error: "Missing question" });
+  if (!email) return res.status(400).json({ error: "Missing email" });
 
-  /* RECAPTCHA */
+  /* Recaptcha toggle */
   const TOGGLE = process.env.RECAPTCHA_TOGGLE || "false";
   if (TOGGLE !== "false") {
-    const rec = await verifyRecaptcha(normalize(fields, "recaptchaToken"), req.headers["x-forwarded-for"]);
+    const rec = await verifyRecaptcha(recaptchaToken, req.headers["x-forwarded-for"]);
     if (!rec.ok) return res.status(400).json({ error: "reCAPTCHA failed", rec });
   }
 
-  /* ===========================
-      COMPATIBILITY MODE
-  ============================ */
-  if (mode === "compat") {
+  /* --- Compatibility mode fields --- */
+  let compat1 = null;
+  let compat2 = null;
 
-    // ----- Person 1 -----
-    const p1 = {
+  if (mode === "compat") {
+    compat1 = {
       fullName: normalize(fields, "c1_fullName"),
       birthDate: normalize(fields, "c1_birthDate"),
       birthTime: normalize(fields, "c1_birthTime"),
-      birthPlace: normalize(fields, "c1_birthPlace"),
+      birthPlace: normalize(fields, "c1_birthPlace")
     };
 
-    const p1Palm = files.c1_palm ? (Array.isArray(files.c1_palm) ? files.c1_palm[0] : files.c1_palm) : null;
-
-    // ----- Person 2 -----
-    const p2 = {
+    compat2 = {
       fullName: normalize(fields, "c2_fullName"),
       birthDate: normalize(fields, "c2_birthDate"),
       birthTime: normalize(fields, "c2_birthTime"),
-      birthPlace: normalize(fields, "c2_birthPlace"),
+      birthPlace: normalize(fields, "c2_birthPlace")
     };
-
-    const p2Palm = files.c2_palm ? (Array.isArray(files.c2_palm) ? files.c2_palm[0] : files.c2_palm) : null;
-
-    // run engines separately
-    const p1Eng = await runAllEngines({ question, mode: "personal", uploadedFile: p1Palm });
-    const p2Eng = await runAllEngines({ question, mode: "personal", uploadedFile: p2Palm });
-
-    // AI compatibility fusion (reuse triad engine)
-    const compatFusion = await runAllEngines({
-      question,
-      mode: "personal",
-      uploadedFile: null
-    });
-
-    const shortHTML = buildSummaryHTML({
-      question,
-      engines: compatFusion,
-      mode: "compat"
-    });
-
-    const longHTML = buildUniversalEmailHTML({
-      mode: "compat",
-      question,
-      p1: { ...p1, engines: p1Eng },
-      p2: { ...p2, engines: p2Eng },
-      compat: {
-        summary: compatFusion.summary,
-        details: compatFusion
-      }
-    });
-
-    await sendEmailHTML({
-      to: email,
-      subject: "Your Compatibility Insight Report",
-      html: longHTML
-    });
-
-    return res.json({
-      ok: true,
-      mode: "compat",
-      shortAnswer: shortHTML
-    });
   }
 
-  /* ===========================
-      PERSONAL MODE (default)
-  ============================ */
+  /* Palm upload */
+  let uploadedFile = null;
+  if (files?.palmImage) {
+    uploadedFile = Array.isArray(files.palmImage) ? files.palmImage[0] : files.palmImage;
+  }
+  if (uploadedFile) {
+    const valid = validateUploadedFile(uploadedFile);
+    if (!valid.ok) return res.status(400).json({ error: valid.error });
+  }
 
-  const fullName = normalize(fields, "fullName");
-  const birthDate = normalize(fields, "birthDate");
-  const birthTime = normalize(fields, "birthTime");
-  const birthPlace = normalize(fields, "birthPlace");
+  /* Engines */
+  let enginesOut;
+  try {
+    enginesOut = await runAllEngines({
+      question,
+      mode,
+      uploadedFile
+    });
+  } catch (err) {
+    return res.status(500).json({ error: "Engine failure", detail: String(err) });
+  }
 
-  const palm = files.palmImage ? (Array.isArray(files.palmImage) ? files.palmImage[0] : files.palmImage) : null;
+  /* Compatibility score (very simple placeholder formula) */
+  let compatScore = 0;
+  if (mode === "compat") {
+    compatScore = Math.floor(40 + Math.random() * 60); // 40–100%
+  }
 
-  const enginesOut = await runAllEngines({
-    question,
-    mode: "personal",
-    uploadedFile: palm
-  });
-
+  /* Short answer */
   const shortHTML = buildSummaryHTML({
     question,
     engines: enginesOut,
-    mode: "personal"
+    mode
   });
 
+  /* Final Email */
   const longHTML = buildUniversalEmailHTML({
-    mode: "personal",
+    title: "Melodie Says",
+    mode,
     question,
     engines: enginesOut,
-    fullName,
-    birthDate,
-    birthTime,
-    birthPlace
+    fullName: normalize(fields, "fullName"),
+    birthDate: normalize(fields, "birthDate"),
+    birthTime: normalize(fields, "birthTime"),
+    birthPlace: normalize(fields, "birthPlace"),
+    compat1,
+    compat2,
+    compatScore
   });
 
-  await sendEmailHTML({
+  /* Send email */
+  const mail = await sendEmailHTML({
     to: email,
-    subject: "Your Personal Insight Report",
+    subject: "Melodie Says — Your Insight Report",
     html: longHTML
   });
 
+  if (!mail.success) {
+    return res.status(500).json({ error: "Email failed", detail: mail.error });
+  }
+
   return res.json({
     ok: true,
-    mode: "personal",
+    mode,
     shortAnswer: shortHTML
   });
 }
