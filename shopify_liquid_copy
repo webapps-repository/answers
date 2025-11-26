@@ -18,7 +18,8 @@
       width:100%; padding:10px; border-radius:6px; border:1px solid #bbb; font-size:1rem;
     }
 
-    #personal-fields { display:none; }
+    #personal-fields { display:block; } /* always visible now */
+    #compat-fields { display:none; margin-top:20px; }
 
     .btn {
       width:100%; padding:14px;
@@ -35,12 +36,39 @@
       line-height:1.55;
     }
 
-    .spinner { display:none; text-align:center; margin-top:10px; color:#444; }
-
     #status-text { margin-top:8px; font-size:0.9rem; color:#555; min-height:1em; }
 
-    #progress { width:100%; height:8px; background:#eee; border-radius:6px; overflow:hidden; margin-top:10px; }
-    #progress-inner { width:0%; height:100%; background:#6c63ff; transition:width .3s linear;}
+    /* Apple/Stripe Spinner */
+    .spinner {
+      display: none;
+      width: 40px;
+      height: 40px;
+      margin: 20px auto 10px auto;
+      border: 4px solid #dad9ff;
+      border-top: 4px solid #6c63ff;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin { 
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .compat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 20px;
+      padding: 10px 0;
+    }
+
+    .compat-header {
+      background: #f0f0ff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-weight: 600;
+      margin-top: 20px;
+    }
   </style>
 </head>
 
@@ -48,13 +76,16 @@
 
 <div id="wrapper">
 
-  <h2>Your Answer (AI Insight Report)</h2>
+  <h2>Ask Melodie</h2>
 
   <form id="main-form" enctype="multipart/form-data">
 
+    <!-- Removed personal checkbox -->
+
+    <!-- Compatibility Checkbox -->
     <div class="field" style="display:flex; align-items:center; gap:8px;">
-      <input type="checkbox" id="isPersonal" style="width:20px;height:20px;">
-      <label for="isPersonal" style="margin:0;">This is a personal question</label>
+      <input type="checkbox" id="isCompat" style="width:20px;height:20px;">
+      <label for="isCompat" style="margin:0;">Compatibility Reading</label>
     </div>
 
     <div class="field">
@@ -67,15 +98,14 @@
       <textarea id="question" name="question" maxlength="200"></textarea>
     </div>
 
-    <!-- technical upload -->
+    <!-- technical upload (deprecated but kept per your rules) -->
     <div class="field" id="technical-field">
       <label>Optional file upload</label>
       <input id="technicalFile" name="technicalFile" type="file">
     </div>
 
-    <!-- personal mode -->
+    <!-- PERSONAL MODE ALWAYS ACTIVE -->
     <div id="personal-fields">
-
       <div class="field"><label>Full Name</label><input id="fullName"></div>
       <div class="field"><label>Date of Birth</label><input id="birthDate" type="date"></div>
       <div class="field"><label>Time of Birth</label><input id="birthTime" type="time"></div>
@@ -89,14 +119,40 @@
       </div>
     </div>
 
+    <!-- COMPATIBILITY MODE FIELDS -->
+    <div id="compat-fields">
+
+      <div class="compat-header">Your Details</div>
+      <div class="compat-grid">
+        <div class="field"><label>Full Name</label><input id="c1_fullName"></div>
+        <div class="field"><label>Date of Birth</label><input id="c1_birthDate" type="date"></div>
+        <div class="field"><label>Time of Birth</label><input id="c1_birthTime" type="time"></div>
+        <div class="field"><label>Birth City</label><input id="c1_birthCity"></div>
+        <div class="field"><label>Birth State</label><input id="c1_birthState"></div>
+        <div class="field"><label>Birth Country</label><input id="c1_birthCountry"></div>
+        <div class="field"><label>Palm Photo</label><input id="c1_palm" type="file" accept="image/*"></div>
+      </div>
+
+      <div class="compat-header">Partner Details</div>
+      <div class="compat-grid">
+        <div class="field"><label>Full Name</label><input id="c2_fullName"></div>
+        <div class="field"><label>Date of Birth</label><input id="c2_birthDate" type="date"></div>
+        <div class="field"><label>Time of Birth</label><input id="c2_birthTime" type="time"></div>
+        <div class="field"><label>Birth City</label><input id="c2_birthCity"></div>
+        <div class="field"><label>Birth State</label><input id="c2_birthState"></div>
+        <div class="field"><label>Birth Country</label><input id="c2_birthCountry"></div>
+        <div class="field"><label>Palm Photo</label><input id="c2_palm" type="file" accept="image/*"></div>
+      </div>
+
+    </div>
+
     <div class="field">
       <div id="recaptcha-box" style="min-height: 40px;"></div>
     </div>
 
     <button id="get-btn" class="btn">Get Answer</button>
 
-    <div id="progress"><div id="progress-inner"></div></div>
-    <div id="spinner" class="spinner">Processing…</div>
+    <div id="spinner" class="spinner"></div>
     <div id="status-text"></div>
 
   </form>
@@ -111,70 +167,46 @@
 <script src="https://www.google.com/recaptcha/api.js?render=6LfTYRcsAAAAADwIcyRkQ9mkyJXIYuaRavmT8D-f"></script>
 
 <script>
-/* ================================
-   API ENDPOINTS
-================================ */
+/* API endpoints */
 const API_SPIRITUAL = "https://answers-rust.vercel.app/api/spiritual-report";
 const API_TECHNICAL = "https://answers-rust.vercel.app/api/technical-report";
 
 let recaptchaToken = null;
 
-/* ======================================================
-   INVISIBLE v2 — AUTO MODE (NO MANUAL RENDER REQUIRED)
-====================================================== */
+/* recaptcha */
 function getRecaptchaToken() {
   return grecaptcha.execute("6LfTYRcsAAAAADwIcyRkQ9mkyJXIYuaRavmT8D-f", { action: "submit" })
-    .then(token => {
-      console.log("INVISIBLE TOKEN:", token);
-      recaptchaToken = token;
-      return token;
-    });
+    .then(t => (recaptchaToken = t));
 }
 
-/* =================================
-   ELEMENTS
-================================= */
-const isPersonalBox = document.getElementById("isPersonal");
+/* elements */
+const isCompat = document.getElementById("isCompat");
 const personalFields = document.getElementById("personal-fields");
 const technicalField = document.getElementById("technical-field");
+const compatFields = document.getElementById("compat-fields");
 
-const questionEl = document.getElementById("question");
 const emailEl = document.getElementById("email");
-const technicalFile = document.getElementById("technicalFile");
+const questionEl = document.getElementById("question");
 
-const progressInner = document.getElementById("progress-inner");
-const spinner = document.getElementById("spinner");
-const statusText = document.getElementById("status-text");
 const summaryWrap = document.getElementById("summary");
 const summaryText = document.getElementById("summary-text");
+const spinner = document.getElementById("spinner");
+const statusText = document.getElementById("status-text");
 
-/* =================================
-   MODE TOGGLE
-================================= */
-isPersonalBox.addEventListener("change", () => {
-  personalFields.style.display = isPersonalBox.checked ? "block" : "none";
-  technicalField.style.display = isPersonalBox.checked ? "none" : "block";
-  summaryWrap.style.display = "none";
-  statusText.textContent = "";
+/* toggle compatibility */
+isCompat.addEventListener("change", () => {
+  if (isCompat.checked) {
+    personalFields.style.display = "none";
+    technicalField.style.display = "none";
+    compatFields.style.display = "block";
+  } else {
+    personalFields.style.display = "block";
+    technicalField.style.display = "block";
+    compatFields.style.display = "none";
+  }
 });
 
-/* =================================
-   PROGRESS BAR
-================================= */
-function progressStart() {
-  progressInner.style.transition = "width 1.2s linear";
-  progressInner.style.width = "40%";
-  setTimeout(() => (progressInner.style.width = "80%"), 1300);
-}
-
-function progressFinish() {
-  progressInner.style.width = "100%";
-  setTimeout(() => (progressInner.style.width = "0%"), 900);
-}
-
-/* =================================
-   FORM SUBMIT
-================================= */
+/* submit */
 document.getElementById("main-form").addEventListener("submit", async e => {
   e.preventDefault();
 
@@ -183,42 +215,64 @@ document.getElementById("main-form").addEventListener("submit", async e => {
 
   spinner.style.display = "block";
   statusText.textContent = "Processing…";
-  progressStart();
 
   const token = await getRecaptchaToken();
-  submitForm(token);
+  sendForm(token);
 });
 
-/* =================================
-   SEND FORM TO BACKEND
-================================= */
-async function submitForm(token) {
+async function sendForm(token) {
   const fd = new FormData();
+
   fd.append("email", emailEl.value);
   fd.append("question", questionEl.value);
   fd.append("recaptchaToken", token);
 
-  let endpoint = isPersonalBox.checked ? API_SPIRITUAL : API_TECHNICAL;
+  let endpoint = API_SPIRITUAL;
 
-  if (isPersonalBox.checked) {
+  if (isCompat.checked) {
+    fd.append("mode", "compat");
+
+    fd.append("c1_fullName", document.getElementById("c1_fullName").value);
+    fd.append("c1_birthDate", document.getElementById("c1_birthDate").value);
+    fd.append("c1_birthTime", document.getElementById("c1_birthTime").value);
+    fd.append("c1_birthPlace", [
+      document.getElementById("c1_birthCity").value,
+      document.getElementById("c1_birthState").value,
+      document.getElementById("c1_birthCountry").value
+    ].join(", "));
+
+    const c1Palm = document.getElementById("c1_palm").files[0];
+    if (c1Palm) fd.append("c1_palm", c1Palm);
+
+    fd.append("c2_fullName", document.getElementById("c2_fullName").value);
+    fd.append("c2_birthDate", document.getElementById("c2_birthDate").value);
+    fd.append("c2_birthTime", document.getElementById("c2_birthTime").value);
+    fd.append("c2_birthPlace", [
+      document.getElementById("c2_birthCity").value,
+      document.getElementById("c2_birthState").value,
+      document.getElementById("c2_birthCountry").value
+    ].join(", "));
+
+    const c2Palm = document.getElementById("c2_palm").files[0];
+    if (c2Palm) fd.append("c2_palm", c2Palm);
+  }
+
+  else {
+    /* regular personal mode */
     fd.append("fullName", document.getElementById("fullName").value);
     fd.append("birthDate", document.getElementById("birthDate").value);
     fd.append("birthTime", document.getElementById("birthTime").value);
-
-    fd.append(
-      "birthPlace",
-      [
-        document.getElementById("birthCity").value,
-        document.getElementById("birthState").value,
-        document.getElementById("birthCountry").value
-      ].join(", ")
-    );
+    fd.append("birthPlace", [
+      document.getElementById("birthCity").value,
+      document.getElementById("birthState").value,
+      document.getElementById("birthCountry").value
+    ].join(", "));
 
     const palm = document.querySelector('input[name="palmImage"]').files[0];
     if (palm) fd.append("palmImage", palm);
 
-  } else {
-    if (technicalFile.files[0]) fd.append("technicalFile", technicalFile.files[0]);
+    const tech = document.getElementById("technicalFile").files[0];
+    if (tech) fd.append("technicalFile", tech);
   }
 
   let out;
@@ -226,14 +280,12 @@ async function submitForm(token) {
     const r = await fetch(endpoint, { method: "POST", body: fd });
     out = await r.json();
   } catch (err) {
-    console.error(err);
     spinner.style.display = "none";
     alert("Server error.");
     return;
   }
 
   spinner.style.display = "none";
-  progressFinish();
 
   summaryText.innerHTML = out.shortAnswer || "(No answer)";
   summaryWrap.style.display = "block";
