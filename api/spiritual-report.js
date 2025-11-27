@@ -11,7 +11,6 @@ import {
   sendEmailHTML
 } from "../lib/utils.js";
 
-import { classifyQuestion } from "../lib/ai.js";
 import { runAllEngines } from "../lib/engines.js";
 import {
   buildSummaryHTML,
@@ -47,6 +46,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Bad form data", detail: String(err) });
   }
 
+  /* mode: personal or compat */
   const mode = normalize(fields, "mode") === "compat" ? "compat" : "personal";
 
   const question = normalize(fields, "question");
@@ -65,7 +65,9 @@ export default async function handler(req, res) {
     if (!rec.ok) return res.status(400).json({ error: "reCAPTCHA failed", rec });
   }
 
-  /* --- Compatibility mode fields --- */
+  /* -----------------------------
+     Compatibility mode fields
+  ----------------------------- */
   let compat1 = null;
   let compat2 = null;
 
@@ -88,32 +90,36 @@ export default async function handler(req, res) {
   /* Palm upload */
   let uploadedFile = null;
   if (files?.palmImage) {
-    uploadedFile = Array.isArray(files.palmImage) ? files.palmImage[0] : files.palmImage;
+    uploadedFile = Array.isArray(files.palmImage)
+      ? files.palmImage[0]
+      : files.palmImage;
   }
   if (uploadedFile) {
     const valid = validateUploadedFile(uploadedFile);
     if (!valid.ok) return res.status(400).json({ error: valid.error });
   }
 
-  /* Engines */
+  /* Engines (now compat-aware) */
   let enginesOut;
   try {
     enginesOut = await runAllEngines({
       question,
       mode,
-      uploadedFile
+      uploadedFile,
+      compat1,
+      compat2
     });
   } catch (err) {
     return res.status(500).json({ error: "Engine failure", detail: String(err) });
   }
 
-  /* Compatibility score (very simple placeholder formula) */
+  /* Compatibility score (placeholder) */
   let compatScore = 0;
   if (mode === "compat") {
     compatScore = Math.floor(40 + Math.random() * 60); // 40–100%
   }
 
-  /* Short answer */
+  /* Short answer for Shopify */
   const shortHTML = buildSummaryHTML({
     question,
     engines: enginesOut,
@@ -135,7 +141,7 @@ export default async function handler(req, res) {
     compatScore
   });
 
-  /* Send email */
+  /* Send */
   const mail = await sendEmailHTML({
     to: email,
     subject: "Melodie Says — Your Insight Report",
