@@ -1,4 +1,4 @@
-// /api/spiritual-report.js
+// /api/spiritual-report.js — Final unified compat-aware API
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const config = { api: { bodyParser: false } };
@@ -46,28 +46,26 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Bad form data", detail: String(err) });
   }
 
-  /* mode: personal or compat */
+  /* Determine mode */
   const mode = normalize(fields, "mode") === "compat" ? "compat" : "personal";
 
   const question = normalize(fields, "question");
   const email = normalize(fields, "email");
-  const recaptchaToken =
+  const token =
     normalize(fields, "recaptchaToken") ||
     normalize(fields, "token");
 
   if (!question) return res.status(400).json({ error: "Missing question" });
   if (!email) return res.status(400).json({ error: "Missing email" });
 
-  /* Recaptcha toggle */
+  /* Recaptcha check */
   const TOGGLE = process.env.RECAPTCHA_TOGGLE || "false";
   if (TOGGLE !== "false") {
-    const rec = await verifyRecaptcha(recaptchaToken, req.headers["x-forwarded-for"]);
+    const rec = await verifyRecaptcha(token, req.headers["x-forwarded-for"]);
     if (!rec.ok) return res.status(400).json({ error: "reCAPTCHA failed", rec });
   }
 
-  /* -----------------------------
-     Compatibility mode fields
-  ----------------------------- */
+  /* Compatibility fields */
   let compat1 = null;
   let compat2 = null;
 
@@ -94,15 +92,15 @@ export default async function handler(req, res) {
       ? files.palmImage[0]
       : files.palmImage;
   }
+
   if (uploadedFile) {
     const valid = validateUploadedFile(uploadedFile);
     if (!valid.ok) return res.status(400).json({ error: valid.error });
   }
 
-  /* ============================
-     Run backend engines (compat-aware)
-  ============================ */
+  /* RUN ENGINES */
   let enginesOut;
+
   try {
     enginesOut = await runAllEngines({
       question,
@@ -115,27 +113,16 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Engine failure", detail: String(err) });
   }
 
-  /* ---------------------------------------------
-     Extract AI-generated score (REAL score)
-  --------------------------------------------- */
-  let compatScore = 0;
-  if (mode === "compat") {
-    compatScore = enginesOut.compatScore || 0;
-  }
+  const compatScore = enginesOut.compatScore || 0;
 
-  /* ---------------------------------------------
-     Build frontend short-answer summary
-  --------------------------------------------- */
+  /* SHORT ANSWER */
   const shortHTML = buildSummaryHTML({
     question,
     engines: enginesOut,
-    mode,
-    compatScore
+    mode
   });
 
-  /* ---------------------------------------------
-     Build full email HTML
-  --------------------------------------------- */
+  /* FULL EMAIL */
   const longHTML = buildUniversalEmailHTML({
     title: "Melodie Says",
     mode,
@@ -150,7 +137,7 @@ export default async function handler(req, res) {
     compatScore
   });
 
-  /* Send email */
+  /* SEND EMAIL */
   const mail = await sendEmailHTML({
     to: email,
     subject: "Melodie Says — Your Insight Report",
