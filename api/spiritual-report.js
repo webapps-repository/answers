@@ -1,4 +1,5 @@
-// /api/spiritual-report.js — Final unified compat-aware API
+// /api/spiritual-report.js — FINAL: full compatibility + palm1/palm2 support
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const config = { api: { bodyParser: false } };
@@ -22,15 +23,13 @@ export default async function handler(req, res) {
   /* CORS */
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers",
-    "Content-Type, Authorization, X-Requested-With, Accept, Origin"
-  );
+  res.setHeader("Access-Control-Allow-Headers","Content-Type, Authorization, X-Requested-With, Accept, Origin");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Not allowed" });
 
-  /* Parse form */
+  /* Parse */
   const form = formidable({
-    multiples: false,
+    multiples: true,
     maxFileSize: 20 * 1024 * 1024,
     keepExtensions: true
   });
@@ -46,23 +45,46 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Bad form data", detail: String(err) });
   }
 
-  /* Determine mode */
   const mode = normalize(fields, "mode") === "compat" ? "compat" : "personal";
 
   const question = normalize(fields, "question");
   const email = normalize(fields, "email");
-  const token =
-    normalize(fields, "recaptchaToken") ||
-    normalize(fields, "token");
 
   if (!question) return res.status(400).json({ error: "Missing question" });
   if (!email) return res.status(400).json({ error: "Missing email" });
 
-  /* Recaptcha check */
+  /* Recaptcha */
+  const recaptchaToken = normalize(fields, "recaptchaToken");
   const TOGGLE = process.env.RECAPTCHA_TOGGLE || "false";
   if (TOGGLE !== "false") {
-    const rec = await verifyRecaptcha(token, req.headers["x-forwarded-for"]);
-    if (!rec.ok) return res.status(400).json({ error: "reCAPTCHA failed", rec });
+    const r = await verifyRecaptcha(recaptchaToken, req.headers["x-forwarded-for"]);
+    if (!r.ok) return res.status(400).json({ error: "reCAPTCHA failed", detail: r });
+  }
+
+  /* Palm files */
+  let palm1File = null;
+  let palm2File = null;
+
+  if (mode === "personal") {
+    if (files?.palmImage) {
+      palm1File = Array.isArray(files.palmImage) ? files.palmImage[0] : files.palmImage;
+      const v = validateUploadedFile(palm1File);
+      if (!v.ok) return res.status(400).json({ error: v.error });
+    }
+  }
+
+  if (mode === "compat") {
+    if (files?.c1_palm) {
+      palm1File = Array.isArray(files.c1_palm) ? files.c1_palm[0] : files.c1_palm;
+      const v1 = validateUploadedFile(palm1File);
+      if (!v1.ok) return res.status(400).json({ error: v1.error });
+    }
+
+    if (files?.c2_palm) {
+      palm2File = Array.isArray(files.c2_palm) ? files.c2_palm[0] : files.c2_palm;
+      const v2 = validateUploadedFile(palm2File);
+      if (!v2.ok) return res.status(400).json({ error: v2.error });
+    }
   }
 
   /* Compatibility fields */
@@ -85,48 +107,32 @@ export default async function handler(req, res) {
     };
   }
 
-  /* Palm upload */
-  let uploadedFile = null;
-  if (files?.palmImage) {
-    uploadedFile = Array.isArray(files.palmImage)
-      ? files.palmImage[0]
-      : files.palmImage;
-  }
-
-  if (uploadedFile) {
-    const valid = validateUploadedFile(uploadedFile);
-    if (!valid.ok) return res.status(400).json({ error: valid.error });
-  }
-
   /* RUN ENGINES */
   let enginesOut;
-
   try {
     enginesOut = await runAllEngines({
       question,
       mode,
-      uploadedFile,
       compat1,
-      compat2
+      compat2,
+      palm1File,
+      palm2File
     });
   } catch (err) {
     return res.status(500).json({ error: "Engine failure", detail: String(err) });
   }
 
-  const compatScore = enginesOut.compatScore || 0;
-
-  /* SHORT ANSWER */
+  /* Shopify short summary */
   const shortHTML = buildSummaryHTML({
     question,
     engines: enginesOut,
     mode
   });
 
-  /* FULL EMAIL */
+  /* Email */
   const longHTML = buildUniversalEmailHTML({
-    title: "Melodie Says",
-    mode,
     question,
+    mode,
     engines: enginesOut,
     fullName: normalize(fields, "fullName"),
     birthDate: normalize(fields, "birthDate"),
@@ -134,18 +140,17 @@ export default async function handler(req, res) {
     birthPlace: normalize(fields, "birthPlace"),
     compat1,
     compat2,
-    compatScore
+    compatScore: enginesOut.compatScore
   });
 
-  /* SEND EMAIL */
-  const mail = await sendEmailHTML({
+  const emailOut = await sendEmailHTML({
     to: email,
     subject: "Melodie Says — Your Insight Report",
     html: longHTML
   });
 
-  if (!mail.success) {
-    return res.status(500).json({ error: "Email failed", detail: mail.error });
+  if (!emailOut.success) {
+    return res.status(500).json({ error: "Email failed", detail: emailOut.error });
   }
 
   return res.json({
